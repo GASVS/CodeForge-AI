@@ -134,16 +134,16 @@ async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, Non
                         try:
                             data = json.loads(line)
                             if "response" in data:
-                                buffer += data["response"]
-                                # Flush buffer periodically for better UX
-                                yield f"data: {json.dumps({'text': buffer})}\n\n"
-                                buffer = ""
+                                chunk = data["response"]
+                                buffer += chunk
+                                # Yield chunk-by-chunk for better UX
+                                yield f"data: {json.dumps({'text': chunk})}\n\n"
                             
                             if data.get("done", False):
-                                # End of generation marker  
+                                # Send completion marker
                                 yield "data: [DONE]\n\n"
-                                break
-                        except json.JSONDecodeError as e:
+                                return  # Exit generator cleanly
+                        except json.JSONDecodeError:
                             continue  # Skip malformed lines
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
