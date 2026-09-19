@@ -15,10 +15,22 @@ echo ""
 if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
     echo "❌ Ollama not running. Starting it..."
     ollama serve &
-    sleep 3
+    sleep 5
 fi
 
-echo "✅ Ollama detected"
+# Wait for Ollama to be ready
+for i in {1..10}; do
+    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        echo "✅ Ollama detected"
+        break
+    fi
+    sleep 1
+done
+
+# List available models
+echo ""
+echo "📚 Available models:"
+curl -s http://localhost:11434/api/tags | python3 -c "import sys,json; d=json.load(sys.stdin); print('\n'.join('  • ' + m['name'] for m in d.get('models',[])))" 2>/dev/null || echo "  (no models found, run 'ollama pull qwen3.5')
 
 # Kill existing servers on ports 8001 and 3000
 kill $(lsof -ti:8001) 2>/dev/null || true
