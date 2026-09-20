@@ -1,9 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react';
-import MessageList from './components/MessageList';
-import MessageInput from './components/MessageInput';
-import SettingsPanel from './components/SettingsPanel';
+import SettingsPanel from '../components/SettingsPanel';
 import FileContext from './FileContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,8 +9,10 @@ import remarkGfm from 'remark-gfm';
 interface UploadedFile {
   id: string;
   filename: string;
-  size: number | string;
+  size: number;
 }
+
+interface Message {
   id: string;
   content: string;
   role: 'user' | 'assistant';
@@ -84,10 +84,12 @@ function App() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [showFilePanel, setShowFilePanel] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+  const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
   // Load theme from localStorage
   useEffect(() => {
@@ -104,7 +106,12 @@ function App() {
       try {
         const res = await fetch(`${API_URL}/api/models`);
         const data = await res.json();
-        setAvailableModels(data.models || []);
+        const models: string[] = data.models || [];
+        setAvailableModels(models);
+        // Fall back to the first locally available model if the default isn't installed
+        setModel((current) =>
+          models.length > 0 && !models.includes(current) ? models[0] : current
+        );
       } catch (err) {
         console.error('Failed to fetch models:', err);
       }
@@ -149,8 +156,9 @@ function App() {
 
     try {
       // Use SSE streaming for real-time updates
+      const fileIds = Array.from(selectedFiles).join(',');
       const eventSource = new EventSource(
-        `${API_URL}/stream/api/chat?message=${encodeURIComponent(content)}&model_name=${encodeURIComponent(model)}`
+        `${API_URL}/stream/api/chat?message=${encodeURIComponent(content)}&model_name=${encodeURIComponent(model)}&file_ids=${encodeURIComponent(fileIds)}`
       );
 
       let fullContent = '';
@@ -410,16 +418,22 @@ function App() {
         <div ref={messagesEndRef} />
       </main>
 
-      {/* File Upload Info (when files uploaded) */}
-      {uploadedFiles.length > 0 && (
-        <div className={`fixed left-4 right-4 bottom-[180px] max-w-6xl mx-auto ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'} border rounded-xl p-3 shadow-lg z-20`}>
-          <div className="flex items-center justify-between">
-            <span className="text-sm">📎 {uploadedFiles.length} file(s) attached</span>
+      {/* File Context panel (toggled) */}
+      {showFilePanel && (
+        <div className={`fixed left-0 right-0 bottom-[84px] z-30 ${theme === 'dark' ? 'bg-slate-950/95' : 'bg-gray-50/95'} backdrop-blur border-t ${borderColor}`}>
+          <div className="max-w-6xl mx-auto p-4">
+            <FileContext
+              uploadedFiles={uploadedFiles}
+              setUploadedFiles={setUploadedFiles}
+              selectedFiles={selectedFiles}
+              setSelectedFiles={setSelectedFiles}
+              theme={theme}
+            />
             <button
-              onClick={() => setUploadedFiles([])}
-              className="text-xs opacity-60 hover:opacity-100"
+              onClick={() => setShowFilePanel(false)}
+              className="mt-3 w-full p-2 text-sm rounded-lg opacity-70 hover:opacity-100 transition-opacity"
             >
-              Clear all
+              Close
             </button>
           </div>
         </div>
@@ -428,25 +442,24 @@ function App() {
       {/* Input Area */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderColor} ${headerBg} p-4`}>
         <div className="max-w-6xl mx-auto flex gap-3">
-          {/* File Upload Button */}
-          <label className="cursor-pointer p-3 hover:bg-slate-800 rounded-xl transition-colors" title="Upload files">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-60 hover:opacity-100">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-            <input
-              type="file"
-              className="hidden"
-              multiple
-              accept=".js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.go,.rs,.html,.css,.json,.md,.txt,.sh"
-              onChange={(e) => {
-                if (e.target.files) {
-                  setUploadedFiles(prev => [...prev, ...Array.from(e.target.files)]);
-                }
-              }}
-            />
-          </label>
+          {/* File Upload Button — opens the context panel */}
+          <button
+            onClick={() => {
+              setShowFilePanel((v) => !v);
+            }}
+            className={`p-3 rounded-xl transition-colors ${theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
+            title="Attach code files"
+          >
+            {uploadedFiles.length > 0 ? (
+              <span className="flex items-center gap-1.5 text-sm font-medium">
+                📎 {selectedFiles.size}
+              </span>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-60">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+              </svg>
+            )}
+          </button>
 
           <input
             type="text"

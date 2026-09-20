@@ -26,7 +26,7 @@ export default function FileContext({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+  const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
   const handleFileSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;

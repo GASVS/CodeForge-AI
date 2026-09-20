@@ -43,9 +43,8 @@ export default function MessageInput({ onSend, disabled }: Props) {
             placeholder="Type your message... (Shift+Enter for new line)"
             disabled={disabled}
             className="flex-1 bg-transparent px-4 py-3 resize-none max-h-32 min-h-[52px] outline-none transition-colors"
-            style={{ color: 'var(--foreground)' }}
+            style={{ color: 'var(--foreground)', height: 'auto', minHeight: '52px' }}
             rows={1}
-            style={{ height: 'auto', minHeight: '52px' }}
           />
           
           <button
