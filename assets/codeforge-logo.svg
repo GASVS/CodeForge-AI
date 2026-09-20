@@ -1,0 +1,28 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="handle" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#a855f7"/>
+    </linearGradient>
+    <linearGradient id="head" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ec4899"/>
+      <stop offset="50%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Hammer Head (AI/Intelligence) -->
+  <rect x="40" y="30" width="90" height="50" rx="8" fill="url(#head)" opacity="0.9"/>
+  <circle cx="226" cy="70" r="36" fill="#fbbf24"/>
+  
+  <!-- Handle (Human/Craft) -->
+  <path d="M 150 90 L 240 180 L 220 200 L 130 110 Z" fill="url(#handle)" opacity="0.95"/>
+  
+  <!-- Spark/Glow Effect (AI Magic) -->
+  <circle cx="226" cy="70" r="42" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.5">
+    <animate attributeName="r" values="42;48;42" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  
+  <!-- Code Brackets Subtle (Developer Identity) -->
+  <path d="M 165 92 L 175 102 L 165 112 M 185 92 L 175 102 L 185 112" stroke="#ffffff" stroke-width="4" fill="none" opacity="0.8"/>
+</svg>
