@@ -16,6 +16,9 @@ import os
 from typing import Optional, AsyncGenerator
 import json
 
+import logging
+logging.basicConfig(level=logging.INFO)
+
 from contextlib import asynccontextmanager
 
 @asynccontextmanager

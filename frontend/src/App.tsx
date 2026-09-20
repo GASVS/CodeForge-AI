@@ -5,6 +5,8 @@ import MessageList from './components/MessageList';
 import MessageInput from './components/MessageInput';
 import SettingsPanel from './components/SettingsPanel';
 import FileUploader from './components/FileUploader';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   id: string;
@@ -322,25 +324,72 @@ function App() {
           </div>
         ) : (
           <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 mb-4">
-            {messages.map((msg, i) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
+            {messages.map((msg, i) => {
+              const isAssistant = msg.role === 'assistant';
+              return (
                 <div
-                  className={`max-w-[80%] p-4 rounded-2xl ${
-                    msg.role === 'user'
-                      ? 'bg-indigo-600 text-white'
-                      : `${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'} border`
-                  }`}
+                  key={msg.id}
+                  className={`flex ${isAssistant ? 'justify-start' : 'justify-end'}`}
                 >
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
-                  <div className={`text-xs mt-2 ${msg.role === 'user' ? 'opacity-75' : 'opacity-50'}`}>
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <div
+                    className={`max-w-[80%] p-4 rounded-2xl ${
+                      isAssistant
+                        ? `${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'} border`
+                        : 'bg-indigo-600 text-white'
+                    }`}
+                  >
+                    {isAssistant ? (
+                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code({ node, inline, className, children, ...props }: any) {
+                              const match = /language-(\w+)/.exec(className || '');
+                              const language = match ? match[1] : 'text';
+                              const codeText = String(children).replace(/\n$/, '');
+                              
+                              if (!inline && match) {
+                                return (
+                                  <div className="relative my-3 rounded-lg overflow-hidden">
+                                    <pre className={`p-4 ${theme === 'dark' ? 'bg-slate-950' : 'bg-gray-100'} overflow-x-auto`}>
+                                      <code className={className} {...props}>
+                                        {children}
+                                      </code>
+                                    </pre>
+                                    <button
+                                      onClick={() => navigator.clipboard.writeText(codeText)}
+                                      className="absolute top-2 right-2 p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-colors"
+                                      title="Copy code"
+                                    >
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                      </svg>
+                                    </button>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <code className="px-1 py-0.5 rounded bg-slate-700/50 text-sm" {...props}>
+                                  {children}
+                                </code>
+                              );
+                            }
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap">{msg.content}</div>
+                    )}
+                    <div className={`text-xs mt-2 ${isAssistant ? 'opacity-50' : 'opacity-75'}`}>
+                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {isLoading && (
               <div className="flex justify-start">
