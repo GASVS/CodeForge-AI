@@ -7,42 +7,42 @@
 - [x] Create directory structure `~/Desktop/App/jev-opensource-dashboard`
 - [x] Write project plan (market research integrated)  
 - [x] Draft README.md for GitHub repo
-- [ ] **Create actual GitHub repository**
+- [x] **Create actual GitHub repository**
   - Public, MIT license
   - Add issue templates (bug report, feature request)
-- [ ] **Initialize codebase** 
+- [x] **Initialize codebase** 
   - Backend: FastAPI + Python venv
   - Frontend: Lovable template / Next.js starter
   - `package.json`, `requirements.txt` files
 
-### Day 2 — Model Integration Test
+### Day 2 — Model Integration Test ✅
 
-- [ ] Ollama API integration test (`curl http://localhost:11434/api/generate`)
-- [ ] Basic FastAPI route: `/api/chat` that streams LLM responses
-- [ ] Error handling for when Ollama isn't running
-- [ ] Add to docs: "How to install Ollama on Mac/Linux/Windows"
+- [x] Ollama API integration test (`curl http://localhost:11434/api/generate`)
+- [x] Basic FastAPI route: `/api/chat` that streams LLM responses
+- [x] Error handling for when Ollama isn't running
+- [x] Add to docs: "How to install Ollama on Mac/Linux/Windows"
 
-### Day 3 — Frontend Chat UI Skeleton
+### Day 3 — Frontend Chat UI Skeleton ✅
 
-- [ ] Start Lovable UI or Next.js + Tailwind
-- [ ] Build chat input box (textarea with Send button)  
-- [ ] Build message display area (user vs AI styling)  
-- [ ] Basic responsive layout (mobile + desktop)
+- [x] Start Lovable UI or Next.js + Tailwind
+- [x] Build chat input box (textarea with Send button)  
+- [x] Build message display area (user vs AI styling)  
+- [x] Basic responsive layout (mobile + desktop)
 
-### Days 4-5 — Connect Frontend to Backend
+### Days 4-5 — Connect Frontend to Backend ✅
 
-- [ ] API call from React chat UI → FastAPI `/api/chat`
-- [ ] Streaming responses (SSE or WebSocket for real-time feel)
-- [ ] Loading states ("AI is typing..." animation)
-- [ ] Basic markdown rendering in AI responses (`react-markdown`)
+- [x] API call from React chat UI → FastAPI `/api/chat`
+- [x] Streaming responses (SSE or WebSocket for real-time feel)
+- [x] Loading states ("AI is typing..." animation)
+- [x] Basic markdown rendering in AI responses (`react-markdown`)
 
-### Days 6-7 — Polish + Week 1 Review
+### Days 6-7 — Polish + Week 1 Review ✅
 
-- [ ] Code highlighting for generated code blocks  
-- [ ] Copy button on code snippets
-- [ ] Clear chat history button
-- [ ] Settings panel stub (model name input, future: API keys)
-- [ ] **Record demo video** for social media later
+- [x] Code highlighting for generated code blocks  
+- [x] Copy button on code snippets
+- [x] Clear chat history button
+- [x] Settings panel stub (model name input, future: API keys)
+- [x] **Record demo video** for social media later
 
 ---
 
