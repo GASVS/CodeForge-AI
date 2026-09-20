@@ -6,8 +6,8 @@ Thank you for your interest in helping build a free, privacy-first alternative t
 
 ```bash
 # Clone repo
-git clone https://github.com/yourusername/jev-opensource-dashboard.git
-cd jev-opensource-dashboard
+git clone https://github.com/YOUR-USERNAME/codeforge-ai.git
+cd codeforge-ai
 
 # Install dependencies
 python3 -m venv venv

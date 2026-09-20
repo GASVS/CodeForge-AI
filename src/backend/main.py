@@ -9,7 +9,7 @@ Week 1 MVP endpoints:
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 import httpx
 import os
@@ -17,6 +17,7 @@ from typing import Optional, AsyncGenerator, List
 import json
 import uuid
 import shutil
+import database
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -303,6 +304,75 @@ async def list_models():
             }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Cannot fetch models: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Conversation history (Week 3) — persists chats to local SQLite
+# ---------------------------------------------------------------------------
+class ChatCreate(BaseModel):
+    title: Optional[str] = None
+    model: Optional[str] = None
+    messages: Optional[List[dict]] = None
+
+
+class ChatUpdate(BaseModel):
+    title: Optional[str] = None
+    messages: Optional[List[dict]] = None
+
+
+@app.get("/api/chats")
+async def api_list_chats(limit: int = 100):
+    return {"chats": database.list_conversations(limit=limit)}
+
+
+@app.post("/api/chats")
+async def api_create_chat(body: ChatCreate):
+    chat = database.create_conversation(
+        title=body.title, messages=body.messages, model=body.model)
+    return chat
+
+
+@app.get("/api/chats/{chat_id}")
+async def api_get_chat(chat_id: str):
+    chat = database.get_conversation(chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@app.put("/api/chats/{chat_id}")
+async def api_update_chat(chat_id: str, body: ChatUpdate):
+    chat = database.update_conversation(
+        chat_id, title=body.title, messages=body.messages)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return chat
+
+
+@app.delete("/api/chats/{chat_id}")
+async def api_delete_chat(chat_id: str):
+    if not database.delete_conversation(chat_id):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"ok": True}
+
+
+@app.get("/api/chats/{chat_id}/export")
+async def api_export_chat(chat_id: str, format: str = "md"):
+    if format == "json":
+        content = database.export_chat_json(chat_id)
+        media_type = "application/json"
+        filename = f"{chat_id}.json"
+    else:
+        content = database.export_chat_md(chat_id)
+        media_type = "text/markdown"
+        filename = f"{chat_id}.md"
+    if content is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 if __name__ == "__main__":

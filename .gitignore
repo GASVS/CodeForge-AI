@@ -28,3 +28,18 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# SQLite local data (CodeForge AI chat store)
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend build output
+frontend/dist/
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+.env
+.venv/

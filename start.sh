@@ -1,9 +1,9 @@
 #!/bin/bash
-# Jev Open Source Dashboard - Startup Script
+# CodeForge AI - Startup Script
 
 set -e
 
-PROJECT_DIR="/home/andrej/Desktop/App/jev-opensource-dashboard"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$PROJECT_DIR/src/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 VENV_DIR="$PROJECT_DIR/venv"
