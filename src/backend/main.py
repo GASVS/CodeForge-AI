@@ -7,19 +7,25 @@ Week 1 MVP endpoints:
 - GET  /stream/api/chat — SSE streaming for real-time updates
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
 import os
-from typing import Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator, List
 import json
+import uuid
+import shutil
 
 import logging
 logging.basicConfig(level=logging.INFO)
 
 from contextlib import asynccontextmanager
+
+# Temporary storage for uploaded files
+UPLOAD_DIR = "/tmp/jev-uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,9 +63,79 @@ app.add_middleware(
 # Request/Response models
 class ChatRequest(BaseModel):
     message: str
-    model_name: Optional[str] = "llama3.2"  # Default Ollama model
+    model_name: Optional[str] = "qwen3.5-9b-64k"  # Updated default
     stream: bool = True
-    context_code: Optional[str] = None  # For future code-awareness
+    context_files: Optional[List[str]] = None  # List of uploaded file IDs
+
+
+# In-memory storage for uploaded files (in production, use database)
+uploaded_files_store: dict = {}
+
+
+@app.post("/api/upload")
+async def upload_file(files: List[UploadFile] = File(...)):
+    """Upload code files for analysis. Returns file IDs that can be referenced in chat."""
+    uploaded_files = []
+    
+    for file in files[:10]:  # Limit to 10 files
+        file_id = str(uuid.uuid4())[:8]
+        filename = f"{file_id}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        try:
+            content = await file.read()
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            
+            uploaded_files_store[file_id] = {
+                "filename": file.filename,
+                "path": file_path,
+                "size": len(content),
+                "content": content.decode('utf-8', errors='ignore')
+            }
+            
+            uploaded_files.append({
+                "id": file_id,
+                "filename": file.filename,
+                "size": len(content)
+            })
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to upload {file.filename}: {str(e)}")
+    
+    return {"files": uploaded_files}
+
+
+@app.get("/api/files")
+async def list_uploaded_files():
+    """List all active uploaded files"""
+    return {
+        "files": [
+            {"id": fid, "filename": data["filename"], "size": data["size"]}
+            for fid, data in uploaded_files_store.items()
+        ]
+    }
+
+
+@app.get("/api/files/{file_id}")
+async def get_file_content(file_id: str):
+    """Get content of uploaded file by ID"""
+    if file_id not in uploaded_files_store:
+        raise HTTPException(status_code=404, detail="File not found")
+    data = uploaded_files_store[file_id]
+    return {"id": file_id, "filename": data["filename"], "content": data["content"]}
+
+
+@app.delete("/api/files/{file_id}")
+async def delete_file(file_id: str):
+    """Delete an uploaded file"""
+    if file_id not in uploaded_files_store:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        os.remove(uploaded_files_store[file_id]["path"])
+        del uploaded_files_store[file_id]
+        return {"message": "File deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Configuration
@@ -78,18 +154,40 @@ async def health_check():
     return {"status": "healthy"}
 
 
+async def add_file_context(message: str, context_files: List[str]) -> str:
+    """Add uploaded file contents to the prompt for code-aware chat"""
+    if not context_files:
+        return message
+    
+    file_contents = []
+    for file_id in context_files[:5]:  # Limit to 5 files to stay within context window
+        if file_id in uploaded_files_store:
+            data = uploaded_files_store[file_id]
+            content = data["content"]
+            filename = data["filename"]
+            file_contents.append(f"File: {filename}\n```\n{content}\n```")
+    
+    if not file_contents:
+        return message
+    
+    context_header = f"\n\nI have the following files for context:\n\n" + "\n\n".join(file_contents)
+    return message + context_header
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    """
-    Main chat endpoint. Routes to Ollama (local) or OpenRouter (cloud).
-    
-    Supports streaming for real-time feel in UI (use /stream/api/chat for SSE).
-    """
+    """Main chat endpoint with optional file context"""
     try:
+        # Add file context if uploaded files are provided
+        enhanced_message = request.message
+        model_to_use = request.model_name or "qwen3.5-9b-64k"
+        if request.context_files:
+            enhanced_message = await add_file_context(request.message, request.context_files)
+        
         if not OPENROUTER_API_KEY:  # Default to local Ollama
-            response = await call_ollama(request.message, request.model_name)
+            response = await call_ollama(enhanced_message, model_to_use)
         else:
-            response = await call_openrouter(request.message)
+            response = await call_openrouter(enhanced_message)
         
         return {"type": "text", "content": response}
     

@@ -4,11 +4,15 @@ import { useState, useEffect, useRef } from 'react';
 import MessageList from './components/MessageList';
 import MessageInput from './components/MessageInput';
 import SettingsPanel from './components/SettingsPanel';
-import FileUploader from './components/FileUploader';
+import FileContext from './FileContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-interface Message {
+interface UploadedFile {
+  id: string;
+  filename: string;
+  size: number | string;
+}
   id: string;
   content: string;
   role: 'user' | 'assistant';
