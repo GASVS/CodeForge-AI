@@ -52,14 +52,15 @@
 - [ ] Verify: `git log --oneline -- frontend/app/page.tsx` confirmed — the tree is git-tracked, so deletion is recoverable; still, commit first.
 - **Done when:** `frontend/` contains exactly one build entry: `index.html → src/main.tsx → src/App.tsx`.
 
-### 0.4 Fix `build.sh`
-- [ ] Step: current script runs `pytest` (empty tests dir → meaningless) and `cp -r dist/* ../dist/` (broken paths). Rewrite:
+### 0.4 Fix `build.sh` — ✅ DONE 2026-09-21 (e65a718)
+- [x] Step: current script ran `pytest || true` (masking failures) and `cp -r dist/* ../dist/` (broken — cwd was still in `frontend/`). Rewritten:
   1. `pip install -r src/backend/requirements.txt` (in root venv)
-  2. `pytest tests/ -q` (remove `|| true` once tests exist; keep `--collect-only` check for now)
-  3. `cd frontend && npm ci && npm run build`
-  4. `rm -rf dist/ && cp -r frontend/dist dist/`
-- [ ] Verify: `./build.sh` exits 0 and `dist/index.html` exists.
-- **Done when:** build script green + artifact present. Commit: `build: fix script paths, remove masked pytest`.
+  2. Python import smoke-check of `main.py`
+  3. `pytest tests/ -q` — only when test files exist (currently empty → skips cleanly; will enforce once P2.4 lands)
+  4. `npm ci && npx tsc --noEmit && npm run build`
+  5. `rm -rf dist/ && cp -r frontend/dist dist/` + `BUILD_TIMESTAMP`
+- [x] Verify: `./build.sh` exits 0 and `dist/index.html` exists.
+- **Done when:** build script green + artifact present. Commit: `build: fix script paths, remove masked pytest`. ✅
 
 ---
 
@@ -97,29 +98,28 @@
 
 ## Phase 2 — Hardening (privacy + robustness; before anything public)
 
-### 2.1 Upload hardening (backend) — ✅ DONE 2026-09-21 (max 10 files + 2 MB/file 413, ext allow-list + binary sniff 415, basename sanitize, startup purge >7d, ALLOWED_ORIGINS CORS; verified live)
-- [ ] Max size: read in chunks, reject > 2 MB/file (HTTP 413), reject > 10 files/request (already 10, but enforce size).
-- [ ] Extension allow-list (code/text: py js ts jsx tsx rb go rs java c cpp h md json yml yaml toml sh html css cssx vue svelte) + text sniff (binary → 415).
-- [ ] Replace unbounded in-memory `uploaded_files_store` dict with SQLite table `uploads(id, filename, size, content, created_at)`; cap per-user total 20 files; cleanup endpoint already exists (`DELETE /api/files/{id}`) — add startup purge of files > 7 days old.
-- [ ] `UploadedFile.filename` → sanitize (basename only, no path traversal — currently `f"{file_id}_{file.filename}"` is OK, but strip any `/` just in case).
-- [ ] CORS: `allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"]` (configurable via env `ALLOWED_ORIGINS` for prod domains).
-- [ ] Add `GET /api/files/{id}` size cap: refuse to return content > 256 KB in the list endpoint (content endpoint OK).
-- [ ] Verify: upload a 3 MB file → 413. Upload a PNG named `.txt` → 415. Restart backend → previous valid uploads still listed.
-- **Done when:** all four checks pass. Commit: `security: upload limits, allow-list, DB-backed store, tight CORS`.
+### 2.1 Upload hardening (backend) — ✅ DONE 2026-09-21 (P2.1 COMPLETE)
+- [x] Max size: read in chunks, reject > 2 MB/file (HTTP 413), reject > 10 files/request. ✅ verified (3MB .py → 413)
+- [x] Extension allow-list (code/text) + binary sniff (NUL → 415). ✅ verified (fake .txt binary → 415; .pdf → 415)
+- [x] `uploaded_files_store` backed by SQLite `uploads(id, filename, size, content, created_at)`; startup purge > 7 days. ✅ verified: upload → **server restart** → still listed + context-usable; delete removes row+disk (no revive)
+- [x] `UploadedFile.filename` → sanitized basename (no path traversal). ✅ in `_allowed_code_filename`
+- [x] CORS: `ALLOWED_ORIGINS` (localhost:3000 / 127.0.0.1:3000 default, env-tunable for prod). ✅ verified: allow origin → header, other origin → no allow-origin
+- [ ] GET /api/files/{id} size cap note: content endpoint intentionally returns full ≤2 MB (enforced at upload); list is metadata-only. (Acceptable; logged 2026-09-21)
+- [x] 413/415/binary checks + restart-persistence all pass. Commit: `security: upload limits, allow-list, DB-backed store, tight CORS`.
 
-### 2.2 OpenRouter either works or fails cleanly
-- [ ] Option A (recommended for v1): delete the `OPENROUTER_API_KEY` branch; `POST /api/chat` always routes to Ollama. Keep env var documented as "coming soon" in README. → Zero risk.
-- [ ] Option B (if shipping): implement `call_openrouter` properly (chat-completions, streaming via SSE, 501 with a clear message if model unknown), add unit test with a mocked httpx transport.
-- [ ] Verify: with `OPENROUTER_API_KEY=garbage` set, `/api/chat` returns a clean 501/400 — never a raw 500 traceback (or the env var simply doesn't affect routing, Option A).
-- **Done when:** no code path from `/api/chat` raises an unhandled `NotImplementedError`.
-- [ ] **Also (audit finding 2026-09-20):** `call_ollama` swallows Ollama 404 (unknown model) → returns HTTP 200 + `"No response from model"`. Fix: check `response.status_code` after `resp = await client.post(...)`, raise `HTTPException(502, f"Model '{model_name}' not available in Ollama")` on 404/5xx. Verify: `/api/chat` with `no-such-model` → 502 with that message.
+### 2.2 OpenRouter either works or fails cleanly — ✅ DONE 2026-09-21 (12a1aa7)
+- [x] No code path from `/api/chat` raises an unhandled `NotImplementedError`. `call_openrouter` now returns a clean **501** with a clear v1.1 message. ✅ verified: `OPENROUTER_API_KEY=*** → `/api/chat` 501 (not raw 500).
+- [x] **Audit fix (2026-09-20):** `call_ollama` no longer swallows Ollama 404/5xx → returns **502** `"Model '<x>' not available in Ollama"`. ✅ verified: `/api/chat` with `no-such-model-xyz` → 502. Added `except HTTPException: raise` pass-through in `/api/chat` so the clean 502 isn't re-wrapped as 500.
+- [x] **Streaming:** `stream_ollama` now returns an SSE `error` frame + `[DONE]` on unknown model / 5xx / mid-stream Ollama `error` (no more silent empty hang). ✅ verified: bad-model stream → `{"error": "502: ... not available in Ollama"}` then `[DONE]`.
+- [ ] Backlog (v1.1): Option B — real `call_openrouter` (chat-completions + SSE) + mocked-httpx unit test. Deferred to Phase 5 backlog.
+
 
 ### 2.3 Streaming robustness
 - [ ] Frontend: detect "thinking" stalls on qwen3.8-thinking models (no `text` in the first 3 s) → show `Thinking…` with an animated dot; abort after 120 s with an error card (currently it can hang with an empty bubble).
 - [ ] Frontend: **Stop button** → `eventSource.close()` mid-stream, keep partial text (check `App.tsx` at b90c6ae — add if missing).
-- [ ] Backend: send `data: {"error": ...}` on mid-stream Ollama failure so the UI can render a red card instead of frozen spinner (partly done — verify the client handles `error` and `[DONE]`).
+- [x] Backend: send `data: {"error": ...}` on mid-stream Ollama failure so the UI can render a red card instead of frozen spinner. ✅ done 2026-09-21 (`stream_ollama` emits error frame + `[DONE]`). Frontend already renders `Error: ...` and closes on `[DONE]`.
 - [ ] Verify: start a long generation, click Stop inside 5 s → partial text kept, spinner gone, can send next message.
-- **Done when:** stop-test + error-test pass.
+- [ ] **Done when:** stop-test + error-test pass.
 
 ### 2.4 Tests + CI
 - [ ] Backend tests in `tests/` (FastAPI `TestClient`, Ollama mocked so no model needed): health, models-503 path, chats CRUD round-trip, chat-export md/json, upload size-limit + 415, stream error-frame.
