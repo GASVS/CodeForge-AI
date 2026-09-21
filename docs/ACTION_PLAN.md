@@ -87,7 +87,7 @@
 - [ ] Verify: create 2 chats, see both in sidebar, delete one, survives refresh.
 - **Done when:** refresh-survival test passes. Commit: `feat: chat history sidebar wired to SQLite backend`.
 
-### 1.4 Delete the dead tree
+### 1.4 Delete the dead tree — ✅ DONE 2026-09-21 (7020e59: app/, frontend/, .next/, FileUploader.tsx, src/globals.css removed; tsc + build green)
 - [ ] Step: now that P1.3 is done, delete `frontend/app/` (page.tsx, layout.tsx, globals.css) and `components/FileUploader.tsx` (superseded by `src/FileContext.tsx`) — ONLY if nothing in the Vite app imports them (grep first).
 - [ ] Step: remove duplicate CSS trees: keep one globals approach; delete the rest.
 - [ ] Verify: `npm run build` clean; search for `@/components` / `app/` imports → none.
@@ -97,7 +97,7 @@
 
 ## Phase 2 — Hardening (privacy + robustness; before anything public)
 
-### 2.1 Upload hardening (backend)
+### 2.1 Upload hardening (backend) — ✅ DONE 2026-09-21 (max 10 files + 2 MB/file 413, ext allow-list + binary sniff 415, basename sanitize, startup purge >7d, ALLOWED_ORIGINS CORS; verified live)
 - [ ] Max size: read in chunks, reject > 2 MB/file (HTTP 413), reject > 10 files/request (already 10, but enforce size).
 - [ ] Extension allow-list (code/text: py js ts jsx tsx rb go rs java c cpp h md json yml yaml toml sh html css cssx vue svelte) + text sniff (binary → 415).
 - [ ] Replace unbounded in-memory `uploaded_files_store` dict with SQLite table `uploads(id, filename, size, content, created_at)`; cap per-user total 20 files; cleanup endpoint already exists (`DELETE /api/files/{id}`) — add startup purge of files > 7 days old.

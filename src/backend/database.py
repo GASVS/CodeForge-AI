@@ -48,6 +48,15 @@ def get_db() -> sqlite3.Connection:
                    messages_json TEXT NOT NULL DEFAULT '[]'
                )"""
         )
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS uploads (
+                   id TEXT PRIMARY KEY,
+                   filename TEXT NOT NULL,
+                   size INTEGER NOT NULL,
+                   content TEXT NOT NULL,
+                   created_at INTEGER NOT NULL
+               )"""
+        )
         _conn.commit()
     return _conn
 
@@ -176,3 +185,77 @@ def export_chat_json(chat_id: str) -> str | None:
     if chat is None:
         return None
     return json.dumps(chat, indent=2)
+
+
+# --- Uploads ---------------------------------------------------------------
+# Code files attached to chat. Persisted so they survive a backend restart
+# (the in-memory dict in main.py is only a runtime cache).
+
+def upload_add(file_id: str, filename: str, content: str, size: int) -> dict:
+    ts = _now()
+    with _lock:
+        get_db().execute(
+            """INSERT OR REPLACE INTO uploads (id, filename, size, content, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (file_id, filename, size, content, ts),
+        )
+        get_db().commit()
+    return {"id": file_id, "filename": filename, "size": size, "created_at": ts}
+
+
+def upload_get(file_id: str) -> dict | None:
+    with _lock:
+        row = get_db().execute(
+            "SELECT * FROM uploads WHERE id = ?", (file_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "filename": row["filename"],
+        "size": row["size"],
+        "content": row["content"],
+        "created_at": row["created_at"],
+    }
+
+
+def upload_list() -> list[dict]:
+    with _lock:
+        rows = get_db().execute(
+            "SELECT * FROM uploads ORDER BY created_at DESC"
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "filename": r["filename"],
+            "size": r["size"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+def upload_delete(file_id: str) -> bool:
+    with _lock:
+        cur = get_db().execute(
+            "DELETE FROM uploads WHERE id = ?", (file_id,)
+        )
+        get_db().commit()
+    return cur.rowcount > 0
+
+
+def purge_uploads(max_age_days: int = 7) -> list[tuple[str, str]]:
+    """Delete upload rows older than the window.
+
+    Returns the (id, filename) pairs removed, so the caller can delete the
+    matching on-disk files (on disk they are named ``{id}_{filename}``).
+    """
+    cutoff = _now() - max_age_days * 86400
+    with _lock:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT id, filename FROM uploads WHERE created_at < ?", (cutoff,)
+        ).fetchall()
+        conn.execute("DELETE FROM uploads WHERE created_at < ?", (cutoff,))
+        conn.commit()
+    return [(r["id"], r["filename"]) for r in rows]

@@ -3,7 +3,7 @@
 > **RULE: After EVERY completed action, append/update its status below before moving on.**
 > If the session crashes, the next session reads this file FIRST and resumes from here.
 
-**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). Weeks 1–2 shipped (chat + streaming + file upload API). **Current objective: repair broken build, wire file context end-to-end, then Week 3 (persistent chat history).**
+**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-09-21: Weeks 1–3 shipped (chat + streaming + file context + SQLite persistence + export), repo cleaned of dead tree, backend hardened (P2.1+P2.2).** **Current objective: P2.3 (streaming Stop button + thinking indicator) → P2.4 (tests + CI) → Phase 3 code-aware core (folder import / RAG / code actions) → Phase 4 polish → Phase 5 launch.**
 
 ---
 
@@ -24,10 +24,13 @@
 | 11 | E2E test: upload file via curl → ask about it via stream w/ file_ids | ✅ DONE | MODEL ANSWER: traced greet('x') → 'Hello X' from uploaded e2e_test.py. Context-awareness PROVEN |
 | 12 | `npm run build` passes clean | ✅ DONE | 286 modules, 319 kB JS bundle, 1.13s |
 | 13 | Commit: fixes + file-context wiring | ✅ DONE | b90c6ae |
-| 14 | Week 3: SQLite conversation store (save/load/delete/export) | ⬜ TODO | backend `database.py` + endpoints |
-| 15 | Week 3: history sidebar in App.tsx (load past chats, new chat, delete) | ⬜ TODO | |
-| 16 | Week 3: export chat to Markdown/JSON | ⬜ TODO | |
-| 17 | Update README + docs/WEEK3, commit | ⬜ TODO | |
+| 14 | Week 3: SQLite conversation store (save/load/delete/export) | ✅ DONE | backend `database.py` + endpoints (A6 verified) |
+| 15 | Week 3: history sidebar in App.tsx (load past chats, new chat, delete) | ✅ DONE | 88d2f75 + 625d1d6 (ChatSidebar tracked) |
+| 16 | Week 3: export chat to Markdown/JSON | ✅ DONE | `/api/chats/{id}/export?format=md|json` (A6 verified) |
+| 17 | Update README + docs/WEEK3, commit | 🟡 PARTIAL | README rewrite uncommitted; see ACTION_PLAN Phase 5 |
+| 18 | P1.4: delete dead Next-style tree + dup uploader | ✅ DONE | 7020e59 |
+| 19 | P2.1: upload limits / allow-list / tight CORS | ✅ DONE | 12a1aa7 (verified live: 413, 415, CORS) |
+| 20 | P2.2: clean 502 on bad model + 501 OpenRouter | ✅ DONE | 12a1aa7 (verified live: 502 + 501) |
 
 ---
 
@@ -54,13 +57,15 @@
 - [📌] ENV CHECK (2026-09-20): Ollama UP. Models: gpt-oss-20b (×3), qwen3.8-27b-96k, qwen3.8:27b, qwen3.5-9b/27b (64k/96k variants). Default model in code (`qwen3.5-9b-64k`) EXISTS ✅ — stale default risk lower than suspected.
 - [✅] **A7.1 DONE — live stack E2E VERIFIED.** Restored App.tsx (487 L) → tsc clean → **found+fixed 2 more bugs while trying to boot**: (a) `start.sh:33` had an **unclosed quote** on the models-line `|| echo "..."` fallback → bash parsed the rest of the script as a string, **nothing after line 33 ever executed** (this is why start.sh had been silently broken beyond the import bug); fixed, `bash -n` OK. (b) (import bug was already fixed in A5). Boot now works: backend :8001 + vite :3000 both up via start.sh.
 - [✅] **A7.2 DONE — full-stack E2E through the FRONTEND (vite :3000 proxy → :8001)**: `GET :3000/src/App.tsx` serves the RESTORED app (markers: EventSource=1, stream/api/chat=1, file_ids=1, api/models=1); proxy upload via `:3000/api/upload` → 200 w/ file id; streaming chat via `:3000/stream/api/chat` with `file_ids` → 200 (answered from context; empty-text one round was the qwen think-gap, frames end `[DONE]`); CORS ok. **The verified backend features are now reachable in the running UI.** Stack shut down + temp files cleaned after test.
-- [⬜] **A7 NEXT** Critical path to "full working app":
+- [✅] **A7 NEXT → DONE (2026-09-21 session)** Critical path to "full working app":
   1. ~~**P1.1** restore App.tsx + boot + E2E~~ ✅ DONE (A7.1 + A7.2)
-  2. **P1.3** Create `frontend/types/chat.ts` + wire ChatSidebar (the backend CRUD it needs is verified working, A6)
-  3. **P2.2** Bad-model fix: in `call_ollama`, check `response.status_code` → raise clean error (502 "model not found: X") instead of returning 200 + "No response from model"
-  4. **P2.1** CORS tighten (currently `*`), upload size limit + start-of-session purge of `/tmp/jev-uploads/*`
-  5. Log each one here as done. Full ordered list: `docs/ACTION_PLAN.md`.
+  2. ~~**P1.3** Create `frontend/types/chat.ts` + wire ChatSidebar~~ ✅ CODE+BUILD (88d2f75) — **P0.1 commit gap CLOSED (625d1d6)**: 88d2f75 imported `../components/ChatSidebar` + `@/types/chat` but BOTH were untracked → fresh clone failed `npx tsc`. Now tracked along with `.gitignore` + `docs/ACTION_PLAN.md`; tsc clean, build green (287 mods).
+  3. ~~**P2.2** Bad-model fix~~ ✅ DONE (12a1aa7): `call_ollama` 400/404/5xx→502 "Model not available"; `stream_ollama` now emits SSE `error`+`[DONE]` on bad model (no hang); `call_openrouter` → clean 501. Verified live: 502 (bad model, both endpoints), 501 (openrouter), happy-path stream OK.
+  4. ~~**P2.1** CORS tighten + upload hardening~~ ✅ DONE (12a1aa7): `allow_origins` from `ALLOWED_ORIGINS` (localhost:3000/127.0.0.1:3000), env-tunable; upload ≤10 files (413) + ≤2 MB (413, chunked) + ext allow-list (415) + binary sniff (415) + basename sanitize; startup purge >7d. Verified live: 413 (3MB), 415 (bin+pdf), CORS allow-localhost/block-evil.
+  5. ~~**P1.4** Delete dead tree~~ ✅ DONE (7020e59): removed `frontend/app/` (Next page/layout/globals), `frontend/frontend/` (broken jest tree), `frontend/.next/`, `components/FileUploader.tsx` (dup of FileContext), unused `src/globals.css`. Confirmed zero live references (grep: only `app/page.tsx` self-imports; main.tsx is the sole live entry). tsc clean, build green.
+- [📌] **REMAINING (v1.0 path, in order)**: P2.3 streaming Stop button + thinking indicator (App.tsx has a 120 s timeout + spinner but no Stop/abort + no thinking dot yet); P2.4 tests+CI (backend `pytest` + vitest + `.github/workflows/ci.yml`); P3 code-aware core (folder import / RAG / 4 code actions); P3.4 model+temp settings; then Phase 4 polish + Phase 5 docs/launch.
 - [📌] RULE re-affirmed: log ONE action at a time the moment it finishes (crashes lose unlogged work).
+- [⚠️] ENV: Ollama models include `qwen3.5:9b` (fast, good for E2E — reply "PONG" in ~1s) and `qwen3.8-27b-96k` (thinking model, long empty-gap — use `qwen3.5:9b` for quick tests). Bad-model tests work with `no-such-model-xyz`.
 
 ### Prior session tasks (from old plan table, context only)
 - [✅] **1** Restored missing `interface Message {` declaration — `frontend/src/App.tsx:15`

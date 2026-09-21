@@ -76,21 +76,48 @@ def _looks_binary(chunk: bytes) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown event handler"""
-    # Startup: purge stale uploaded files (> 7 days)
+    # Startup: purge stale uploads (> 7 days) — DB rows + on-disk files
     try:
-        removed = 0
+        removed_pairs = database.purge_uploads(max_age_days=7)
         cutoff = time.time() - 7 * 86400
+        for file_id, filename in removed_pairs:
+            p = os.path.join(UPLOAD_DIR, f"{file_id}_{filename}")
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                pass
+        # orphan on-disk files (no DB row) beyond the retention window
         for entry in os.scandir(UPLOAD_DIR):
             try:
                 if time.time_ns() // 1_000_000_000 < cutoff and entry.is_file():
                     os.remove(entry.path)
-                    removed += 1
             except OSError:
                 pass
-        if removed:
-            print(f"🧹 Purged {removed} stale upload file(s) from {UPLOAD_DIR}")
+        if removed_pairs:
+            print(f"🧹 Purged {len(removed_pairs)} stale upload(s)")
     except Exception as e:
         print(f"⚠️ Upload purge failed: {e}")
+
+    # Startup: hydrate the in-memory upload cache from SQLite (survives restart)
+    try:
+        for row in database.upload_list():
+            file_id = row["id"]
+            if file_id not in uploaded_files_store:
+                disk_path = os.path.join(UPLOAD_DIR, f"{file_id}_{row['filename']}")
+                data = {
+                    "filename": row["filename"],
+                    "path": disk_path,
+                    "size": row["size"],
+                    "created_at": row["created_at"],
+                }
+                content = database.upload_get(file_id)
+                data["content"] = content["content"] if content else ""
+                uploaded_files_store[file_id] = data
+        if uploaded_files_store:
+            print(f"📎 Restored {len(uploaded_files_store)} attached file(s) from SQLite")
+    except Exception as e:
+        print(f"⚠️ Upload restore failed: {e}")
 
     # Startup: check Ollama
     try:
@@ -193,14 +220,17 @@ async def upload_file(files: List[UploadFile] = File(...)):
             )
 
         content = b"".join(chunks)
+        text_content = content.decode("utf-8", errors="ignore")
         with open(file_path, "wb") as f:
             f.write(content)
 
+        # Persist to SQLite (source of truth; survives restart) and cache in memory
+        database.upload_add(file_id, safe_name, text_content, total)
         uploaded_files_store[file_id] = {
             "filename": safe_name,
             "path": file_path,
             "size": total,
-            "content": content.decode("utf-8", errors="ignore"),
+            "content": text_content,
             "created_at": time.time(),
         }
 
@@ -233,12 +263,17 @@ async def get_file_content(file_id: str):
 
 @app.delete("/api/files/{file_id}")
 async def delete_file(file_id: str):
-    """Delete an uploaded file"""
-    if file_id not in uploaded_files_store:
+    """Delete an uploaded file (on-disk file + in-memory cache + SQLite row)."""
+    if file_id not in uploaded_files_store and database.upload_get(file_id) is None:
         raise HTTPException(status_code=404, detail="File not found")
     try:
-        os.remove(uploaded_files_store[file_id]["path"])
-        del uploaded_files_store[file_id]
+        if file_id in uploaded_files_store:
+            path = uploaded_files_store[file_id].get("path")
+            if path and os.path.exists(path):
+                os.remove(path)
+            del uploaded_files_store[file_id]
+        # also remove the persisted row so it doesn't revive on next start
+        database.upload_delete(file_id)
         return {"message": "File deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
