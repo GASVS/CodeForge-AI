@@ -10,7 +10,9 @@
   --border: #3f3f46;
   --input-bg: #18181b;
   --message-user: #2563eb;
+  --message-user-text: #ffffff;
   --message-ai: #27272a;
+  --message-ai-text: #ededed;
   --sidebar-bg: #18181b;
   --input-border: #52525b;
 }
@@ -23,7 +25,9 @@
   --border: #e4e4e7;
   --input-bg: #f9fafb;
   --message-user: #2563eb;
+  --message-user-text: #ffffff;
   --message-ai: #f4f4f5;
+  --message-ai-text: #18181b;
   --sidebar-bg: #f9fafb;
   --input-border: #d4d4d8;
 }

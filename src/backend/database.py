@@ -20,7 +20,13 @@ import threading
 import time
 import uuid
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "codeforge.db")
+_DB_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "private",
+    "runtime",
+)
+os.makedirs(_DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(_DB_DIR, "codeforge.db")
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -89,7 +95,7 @@ def get_conversation(chat_id: str) -> dict | None:
         row = get_db().execute(
             "SELECT * FROM conversations WHERE id = ?", (chat_id,)
         ).fetchone()
-    return _row_to_dict(row) if row else None
+    return _summarize(row) if row else None
 
 
 def create_conversation(title: str | None = None,

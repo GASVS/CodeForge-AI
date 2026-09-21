@@ -7,7 +7,7 @@ Week 1 MVP endpoints:
 - GET  /stream/api/chat — SSE streaming for real-time updates
 """
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
@@ -19,14 +19,21 @@ import uuid
 import shutil
 import database
 
-import logging
-logging.basicConfig(level=logging.INFO)
+import logging as logging_module
+
+logging_module.basicConfig(level=logging_module.INFO)
+logger = logging_module.getLogger(__name__)
 
 from contextlib import asynccontextmanager
+
+# Configuration (must be defined before app creation)
+OLLAMA_BASE_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Temporary storage for uploaded files
 UPLOAD_DIR = "/tmp/jev-uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -139,11 +146,6 @@ async def delete_file(file_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Configuration
-OLLAMA_BASE_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-
-
 @app.get("/")
 async def root():
     return {"message": "Jev Open Source Dashboard API", "status": "running"}
@@ -238,15 +240,14 @@ async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, Non
                             if "response" in data:
                                 chunk = data["response"]
                                 buffer += chunk
-                                # Yield chunk-by-chunk for better UX
                                 yield f"data: {json.dumps({'text': chunk})}\n\n"
-                            
+                
                             if data.get("done", False):
-                                # Send completion marker
                                 yield "data: [DONE]\n\n"
-                                return  # Exit generator cleanly
-                        except json.JSONDecodeError:
-                            continue  # Skip malformed lines
+                                return
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to parse line: {line}, error: {e}")
+                            continue
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 

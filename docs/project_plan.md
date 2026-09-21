@@ -1,16 +1,25 @@
-# Jev Open Source Dashboard Project Plan
+# Jev Open Source Dashboard (CodeForge AI) — Project Plan
 
-**Status**: Planning Phase  
-**Target MVP**: 4-6 weeks  
-**Primary Tech Stack**: Lovable (UI), Python FastAPI, SQLite/PostgreSQL  
+**Status**: In development — Week 3+ (frontend regression in repair)
+**Target MVP**: 4–6 weeks (revised: see `docs/ACTION_PLAN.md`)
+**Actual Tech Stack**: React 18 + Vite 5 + TypeScript + Tailwind (frontend) · Python 3.11 FastAPI + SQLite (backend) · Ollama (local LLMs)
+
+> ⚠️ **Earlier versions of this plan said "Next.js + Lovable". The repo never used either.**
+> `frontend/package.json` has no `next` dependency; the live entry is Vite (`frontend/src/main.tsx → src/App.tsx`, dev port 3000, proxy `/api` → backend :8001).
+>
+> **Documentation map (single source of truth per audience):**
+> - Day-to-day state + crash recovery: **`SESSION_LOG.md`**
+> - Step-by-step next work: **`docs/ACTION_PLAN.md`**
+> - Public-facing: **`README.md`** (rewrite needed — currently a copy of this plan)
+> - Strategy: this file.
 
 ---
 
 ## Executive Summary
 
-Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) that leverages local + cloud AI models with a beautiful UI built using Lovable.
+Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) powered by local LLMs (Ollama) with a clean, fast web UI. Users keep full control: model choice, their own API keys, code never leaves the machine.
 
-**Key Differentiator**: Beautiful, intuitive UI that makes existing open-source tools look dated (Lovable advantage).
+**Key differentiator**: Privacy-first local-first design, zero cost, user-controlled models, and a UI that makes self-hosted tools feel finished.
 
 ---
 
@@ -24,153 +33,119 @@ Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) t
 
 ---
 
-## MVP Scope (Weeks 1-4)
+## Reality Check — verified against the code, 2026-09-20
 
-### Phase 1: Core Architecture (Days 1-5)
+### Backend `src/backend/` — Weeks 1–3 features are DONE ✅ (one startup bug, one dead path)
 
-#### Tasks
-1. **Project Setup**
-   - Initialize Next.js + Lovable template
-   - Set up FastAPI backend
-   - Configure SQLite database for user preferences
-   - GitHub repo with MIT license
+| Capability | Endpoints | Status |
+|---|---|---|
+| Health check | `GET /health` | ✅ |
+| Model listing (Ollama) | `GET /api/models` | ✅ |
+| Non-streaming chat | `POST /api/chat` | ✅ |
+| **SSE streaming chat** | `GET /stream/api/chat` (+ `file_ids` context) | ✅ E2E-verified at commit `b90c6ae` |
+| Multi-file upload | `POST /api/upload`, `GET/DELETE /api/files[/{id}]` | ✅ (hardening gaps below) |
+| File-context injection | `add_file_context()` | ✅ works (naive prompt concat) |
+| **Conversation persistence** | `GET/POST /api/chats`, `GET/PUT/DELETE /api/chats/{id}` | ✅ SQLite via `database.py` |
+| **Chat export** | `GET /api/chats/{id}/export?format=md\|json` | ✅ |
+| Cloud models (OpenRouter) | `call_openrouter()` | ❌ raises `NotImplementedError` → HTTP 500 if `OPENROUTER_API_KEY` is set |
+| Auth / GitHub OAuth (plan Phase 1.3) | — | not started (deferred) |
 
-2. **Model Provider abstraction**
-   - Local model support (Ollama API integration)
-   - Free tier cloud models: OpenRouter free endpoints
-   - Paid tier: OpenAI, Anthropic via user's own keys
-   - Model switching without restart
+**Blocking bug (verified by import test):** `main.py:20` — `from . import database` is a relative import in a module run as top-level `main`. **`uvicorn main:app` (i.e. `start.sh`) crashes with `ImportError: attempted relative import with no known parent package`.** Fix: `import database`.
 
-3. **Authentication**
-   - Optional GitHub OAuth for syncing settings across devices
-   - Local-first: full functionality works offline/locally
+**Hardening gaps** (contradict the privacy posture if published as-is): CORS `allow_origins=["*"]`; uploads have no size limit, content is kept in an unbounded in-memory dict + `/tmp/jev-uploads` with no cleanup; `tests/` is empty; `build.sh` hides failures with `pytest … || true`.
 
-### Phase 2: UI/UX Build (Days 6-15)
+### Frontend — split-brain; live entry is a stub ❌ (regression)
 
-#### Tasks
-1. **Chat Interface** (Lovable primary work)
-   - Code-aware chat with syntax highlighting
-   - File tree sidebar integration (optional, VFS or local filesystem for desktop version)
-   - Command palette (Cmd+K to run commands like Jev)
-   - Conversation history sidebar
+| Artifact | State |
+|---|---|
+| `frontend/src/App.tsx` (live Vite entry) | **66-line stub at HEAD**: theme toggle + a textarea that `console.log`s. No chat, no API calls. The full 487-line working version (streaming chat, FileContext panel, markdown rendering, model selector) survives in git at `b90c6ae:frontend/src/App.tsx`. |
+| `frontend/app/page.tsx` (Next-style tree) | 286-line chat UI — the **most complete frontend in the repo** (chat list, FileUploader, Settings) — but **unbuildable**: no Next.js dependency anywhere, and it + `components/ChatSidebar.tsx` import `@/types/chat`, a module **that does not exist**. |
+| `frontend/components/` | MessageList, MessageInput, SettingsPanel, FileUploader, ChatSidebar (broken import) — Vite-compatible with fixes |
+| `frontend/src/FileContext.tsx` | Working Week-2 drag-and-drop upload panel — only rendered by the lost 487-line App |
+| `frontend/frontend/` | Nested duplicate (jest test + package.json) — junk |
+| Duplication | Two app shells (`src/App.tsx` vs `app/page.tsx`), two uploaders (FileContext vs FileUploader), three CSS trees (`app/globals.css`, `src/globals.css`, `src/index.css`) |
 
-2. **Code Context**
-   - Upload/scan local codebase (read-only, privacy-first)
-   - "Explain this file" feature using context window
-   - Highlight matching code segments in responses
+### Repo hygiene ❌
 
-3. **Settings Panel**
-   - Model provider configuration
-   - API key management (encrypted storage)
-   - Theme settings (light/dark/system)
-   - Shortcut customization
+- **No `.gitignore`** (deleted in commit `6b07a3f`). Untracked but on disk: `private/`, `frontend/.env.local`, `src/backend/codeforge.db*`, 3× `venv/`, `node_modules/`, `dist/`. Any `git add .` commits secrets + a local DB.
+- `tests/` empty; `build.sh` has broken path logic (`cp -r dist/* ../dist/`).
+- Docs badly out of date — drift map below.
 
-### Phase 3: Core Features (Days 16-25)
+### Docs drift map
 
-#### Tasks
-1. **Code Generation**
-   - Generate functions from comments/specs
-   - Multi-file awareness for refactoring suggestions
-   - Unit test generation from codebase
+| Doc | Claims | Reality |
+|---|---|---|
+| `README.md` | Copy of this plan, "Planning Phase" | App is mid-Week-3; README must be its own public doc |
+| `docs/mvp_report.md` | "No streaming", "Next.js 14", "no file upload" | Streaming ✅, file upload ✅, stack is Vite |
+| `docs/project_status_resume.md` | "Week 2, Vite chat E2E ✅, Next.js 14" | Was true at `b90c6ae`, then **regressed**; no Next.js anywhere |
+| `SESSION_LOG.md` | Week 3 = TODO | Week-3 **backend is done**; chat sidebar exists but dead; log predates the App.tsx regression |
 
-2. **Chat with Codebase**
-   - Vector embeddings of code files (local-first with ChromaDB or LanceDB)
-   - Semantic search across project files
-   - "Where is X defined?" queries
+---
 
-3. **Terminal Integration** (basic)
-   - In-app terminal preview
-   - Execute commands in safe sandbox or show as copy-paste
+## Consolidated Roadmap (done / remaining)
 
-### Phase 4: Polish + Documentation (Days 26-30)
+| # | Milestone | Backend | Frontend | Status |
+|---|---|---|---|---|
+| W1 | Chat UI + Ollama streaming | ✅ | 🔴 regressed to stub | restore (ACTION_PLAN P1) |
+| W2 | File upload + code-aware chat | ✅ E2E proven | 🟡 code exists (FileContext) but not wired into live entry | rewire (P1.3) |
+| W3 | Persistence: store, sidebar, export | ✅ + SQLite | 🟡 `ChatSidebar.tsx` exists w/ broken import | wire (P1.4) |
+| W4 | Code-aware core: folder import, file tree, semantic search (RAG) | ⬜ | ⬜ | P3 |
+| W5 | UX polish: highlighting, stop button, empty states, responsive | — | — | P4 |
+| W6 | Launch: README, demo, issue templates, PH/HN, v1.0 | CI ✅ needed | — | P5 |
 
-#### Tasks
-1. **Performance Optimization**
-   - Stream responses (don't wait for full generation)
-   - Lazy load large codebases
-   - Cache common queries
-
-2. **Documentation**
-   - README.md with installation guide
-   - Feature showcase screenshots from Lovable builds
-   - Contributing guidelines
-   - Discord/Slack invite link for community
-
-3. **Launch Prep**
-   - Submit to Product Hunt
-   - Prepare Hacker News submission (wait for quiet day, not during big launches)
-   - Create demo video/gif for social media
-   - Outreach to 50+ indie hackers on Twitter/X asking for feedback
+**Ordered, verifiable steps for every remaining item: [`docs/ACTION_PLAN.md`](./ACTION_PLAN.md).**
 
 ---
 
 ## Competitive Analysis
 
-### Jev (Target Market Leader)
+### Jev (target market leader)
 
-| Aspect | Jev | Our Angle |
+| Aspect | Jev | Our angle |
 |--------|-----|-----------|
 | Price | $400/year | Free + optional donations |
-| Platform | VS Code extension | Standalone app + extensions later |
-| AI Provider | Proprietary/Cloud | User choice (local + cloud) |
-| Privacy | Cloud processing | Optional local-first mode |
-| UI/UX | Functional but basic | Beautiful (Lovable polish) |
+| Platform | VS Code extension | Standalone web app + extensions later |
+| AI provider | Proprietary/cloud | User choice (local + cloud keys) |
+| Privacy | Cloud processing | Local-first by default, zero telemetry |
+| UI/UX | Functional | Clean, fast, focused |
 
-**Our Winning Strategy**: Better UX + privacy focus + free = viral loop within indie dev community.
+**Winning strategy**: better UX + privacy + free = viral loop in the indie-dev community.
 
----
+### Existing open-source / commercial alternatives
 
-### Existing Open Source Alternatives
-
-| Tool | Strengths | Weaknesses | How We Beat Them |
+| Tool | Strengths | Weaknesses | How we beat them |
 |------|-----------|------------|------------------|
-| **Cursor** (not open source but free tier) | Great UI, Claude integration | Freemium limits, cloud-only at premium | Local first, unlimited |
-| **Continue.dev** | Open source VS Code extension | Requires setup, CLI-heavy config | Out-of-box beautiful UI |
-| **Tabby** | Self-hosted, local models | Developer experience (UI) raw | Modern UX with Lovable |
-| **Codeium** | Fast, free tier available | Proprietary, privacy concerns | Open source transparency |
+| **Cursor** | Great UI, Claude integration | Freemium limits, cloud-first | Local first, unlimited |
+| **Continue.dev** | Open source, powerful | Extension-only, setup-heavy | Out-of-the-box web app |
+| **Tabby** | Self-hosted, local models | Raw UX | Modern UX |
+| **Codeium** | Fast, free tier | Proprietary | Transparency |
 
 ---
 
-## Technical Architecture
+## Technical Architecture (as-built + planned)
 
 ```
 ┌─────────────────────────────────────────┐
-│         Frontend (Lovable + React)      │
-│  - Chat Interface                       │
-│  - File tree                            │
-│  - Settings Panel                       │
-│  - Terminal Preview                     │
+│   Frontend (React 18 + Vite 5 + TS)     │
+│   Chat UI · File panel · Chat sidebar   │
+│   Settings · Themes                     │
 └──────────────┬──────────────────────────┘
-               │
-               │ WebSocket/HTTP
-               │
+               │ HTTP + SSE (:3000 dev proxy → :8001)
 ┌──────────────▼──────────────────────────┐
-│      Backend (FastAPI + Python)         │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │ Model Provider Abstraction     │   │
-│  ├─────────────────────────────────┤   │
-│  │ - Ollama (local)               │   │
-│  │ - OpenRouter (free/paid)       │   │
-│  │ - Direct API (user's keys)     │   │
-│  └─────────────────────────────────┘   │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │ Code Indexing Service          │   │
-│  │ - File scanning                │   │
-│  │ - Vector embeddings (Chroma)   │   │
-│  │ - Semantic search              │   │
-│  └─────────────────────────────────┘   │
+│      Backend (FastAPI, Python 3.11)     │
+│  Model provider layer: Ollama ✅        │
+│              OpenRouter ❌ (TODO)        │
+│  File-context store (uploads → prompt)  │
+│  Conversation store (SQLite, database.py)│
 └──────────────┬──────────────────────────┘
-               │
-               │ SQLite/PostgreSQL
-               │
+               │ localhost:11434
 ┌──────────────▼──────────────────────────┐
-│        Database                        │
-│  - User preferences                    │
-│  - Conversation history                │
-│  - Codebase embeddings metadata        │
+│   Ollama (local models)                 │
+│   qwen-family, 100% offline             │
 └─────────────────────────────────────────┘
+
+Planned, not built: code indexing + local
+vector search (RAG); Postgres option; auth.
 ```
 
 ---
@@ -178,11 +153,14 @@ Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) t
 ## Risk Mitigation
 
 | Risk | Probability | Impact | Mitigation |
-|------|-------------|--------|------------|
-| **Overscoping** | High | Critical | Strict MVP scope, defer advanced features to v2 |
-| **LLM costs** | Medium | Medium | Default to free/local models, clear pricing for paid tiers |
-| **Competition releases feature** | Medium | Low | Differentiate on UX + community + speed of iteration |
-| **Privacy concerns** | High | Critical | Local-first architecture, transparent data handling, no telemetry by default |
+|------|-------------|--------|-----------|
+| **Overscoping** | High | Critical | Strict MVP scope; ACTION_PLAN phases are the gate |
+| **Docs/code drift (recurring!)** | Confirmed | High | One owner per doc type (map above); update `SESSION_LOG.md` every action |
+| **Frontend split-brain (2 app shells)** | Confirmed | High | P1 collapses to one Vite app; dead tree deleted |
+| **Secrets leak on publish (no .gitignore)** | High | Critical | ACTION_PLAN 0.1 — **before any push** |
+| **LLM costs** | Medium | Medium | Default local; OpenRouter optional via user key |
+| **Privacy concerns** | High | Critical | Local-first; CORS+upload hardening (P2) before public push |
+| **Qwen "thinking" models stall streams** | Confirmed | Medium | "Thinking…" UI state + long timeouts (P2.4) |
 
 ---
 
@@ -190,73 +168,41 @@ Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) t
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| GitHub stars | 100+ | Repository analytics |
-| Active users (daily) | 50+ | Optional anonymous usage tracking (opt-in) |
-| Community (Discord/Slack) | 200+ members | Platform stats |
+| GitHub stars | 100+ | Repo analytics |
+| Active users (daily) | 50+ | Opt-in anonymous count (none by default) |
+| Community | 200+ | Discord |
 | Product Hunt upvotes | 200+ | Launch day |
-| Hacker News engagement | 50+ comments on post | hn api |
+| HN engagement | 50+ comments | HN API |
 
 ---
 
 ## Monetization Strategy (Post-MVP)
 
-**Phase 1**: Free, open source build community and trust  
-**Phase 2** (Month 4+): Optional paid features:
-- Cloud sync across devices ($5/mo)
-- Priority access to new model integrations  
-- Commercial hosting for enterprise teams ($49/mo)
-- Accept donations via Open Collective
+**Phase 1**: Free, open source, no telemetry.
+**Phase 2** (Month 4+): optional paid — cloud sync ($5/mo), team workspaces ($49/mo), priority model integrations, donations via Open Collective.
+
+> Philosophy: *Monetize convenience, not capability. Core stays free forever.*
 
 ---
 
-## Team Roles Needed
+## Timeline (revised around ACTION_PLAN phases)
 
-| Role | Tasks | Notes |
-|------|-------|-------|
-| **Full-stack dev** (You/AI) | Core app, API integration | Primary builder |
-| **Designer** (Lovable does this) | UI/UX polish | Already covered by tool |
-| **Community manager** | Discord/forums moderation | Can be you initially |
-| **Marketing** | Launch posts, outreach | Focus on HN + PH launch day |
-
----
-
-## Next Immediate Actions
-
-### Week 1 Checklist
-
-- [ ] Create GitHub repo with this plan as README (partially filled)
-- [ ] Initialize Lovable project with Next.js template  
-- [ ] Build basic chat UI component  
-- [ ] Integrate Ollama test API call
-- [ ] Write blog post draft: "Why we're building open source Jev alternative"
-
-### Resources Needed
-
-- VPS for hosting demo (free tier DigitalOcean/Fly.io/Hetzner)
-- Lovable Pro account (if needed for advanced features)
-- Domain name ($12/yr for future branding)
-- Figma account (optional, for early wireframes if not using Lovable exclusively)
-
----
-
-## Timeline Summary
-
-| Week | Milestone | Deliverable |
-|------|-----------|-------------|
-| **1** | Foundation + test model integration | Chat UI working with Ollama locally |
-| **2** | Code awareness features complete | Can upload project files and chat about them |
-| **3** | Polish core flows | End-to-end feature: explain code, generate tests |
-| **4** | Beta launch prep | Documentation + demo video ready |
-| **5-6** | Public release | Product Hunt + HN launch, gather feedback |
+| Phase | Work | Target |
+|-------|------|--------|
+| P0 — Repo safety | `.gitignore`, startable backend, frontend-tree decision | Day 1 |
+| P1 — Restore working app | Vite app back (from `b90c6ae`), ChatSidebar wired, dead code deleted, E2E green | Days 1–2 |
+| P2 — Hardening | Upload limits, CORS, OpenRouter graceful failure, streaming robustness, tests, CI | Days 3–5 |
+| P3 — Code-aware core | Folder import, file tree, embeddings search (RAG), code actions | Days 6–10 |
+| P4 — UX polish | Code highlighting pass, stop/streaming UX, empty states, responsiveness | Days 10–12 |
+| P5 — Launch | README, demo, issue templates, PH/HN, v1.0 tag | Days 12–15 |
 
 ---
 
 ## Notes from Market Research
 
-Key user complaints about existing solutions:
-1. **"Too expensive"** → Free open source solves this immediately  
-2. **"Privacy concerns with cloud AI"** → Local-first architecture as default
-3. **"UI feels clunky/outdated"** → Lovable gives us modern, beautiful interface  
-4. **"No control over models"** → Give users full choice of model + provider
+1. **"Too expensive"** → free open source solves this immediately
+2. **"Privacy concerns with cloud AI"** → local-first by default
+3. **"UI feels clunky/outdated"** → clean, fast, focused UI
+4. **"No control over models"** → full choice of model + provider
 
-Leverage these in marketing materials: _"Finally, an AI coding assistant that respects your privacy and wallet."_
+Launch hook: *"Finally, an AI coding assistant that respects your privacy and your wallet."*

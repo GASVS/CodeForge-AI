@@ -5,6 +5,7 @@ import MessageList from '@/components/MessageList'
 import MessageInput from '@/components/MessageInput'
 import SettingsPanel from '@/components/SettingsPanel'
 import FileUploader from '@/components/FileUploader'
+import ChatSidebar from '@/components/ChatSidebar'
 
 interface Message {
   id: string
@@ -33,18 +34,34 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [chats, setChats] = useState<Array<{id:string,title:string,updated_at:number}>>([])
+  const [selectedChat, setSelectedChat] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
 
-  // Load theme from localStorage on mount
+  // Load theme and chat list on mount
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'dark' | 'light' | null
     if (savedTheme) {
       setTheme(savedTheme)
       document.documentElement.setAttribute('data-theme', savedTheme)
     }
+    loadChats()
   }, [])
+
+  const loadChats = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/chats`)
+      const data = await res.json()
+      setChats(data.chats)
+      if (data.chats.length && !selectedChat) {
+        setSelectedChat(data.chats[0].id)
+      }
+    } catch (err) {
+      console.error('Failed to load chats:', err)
+    }
+  }
 
   // Toggle theme mode
   const toggleTheme = () => {
@@ -98,45 +115,54 @@ export default function ChatPage() {
     setMessages(prev => [...prev, assistantMsg])
 
     try {
-      // Use EventSource for SSE streaming
-      const eventSource = new EventSource(`${API_URL}/stream/api/chat?message=${encodeURIComponent(content)}&model_name=${encodeURIComponent(model)}`)
+      // Use fetch + readableStream for better SSE handling
+      const url = new URL(`${API_URL}/stream/api/chat`)
+      url.searchParams.append('message', content)
+      url.searchParams.append('model_name', model)
+      
+      const response = await fetch(url.toString(), { method: 'GET' })
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       
       let fullContent = ''
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
       
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.text) {
-            fullContent += data.text
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === assistantMsgId ? { ...msg, content: fullContent } : msg
-              )
-            )
+      const decoder = new TextDecoder()
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            
+            if (data === '[DONE]') {
+              setIsLoading(false)
+              return
+            }
+            
+            try {
+              const parsed = JSON.parse(data)
+              if (parsed.text) {
+                fullContent += parsed.text
+                setMessages(prev =>
+                  prev.map(msg =>
+                    msg.id === assistantMsgId ? { ...msg, content: fullContent } : msg
+                  )
+                )
+              }
+            } catch (e) {
+              // Skip non-JSON data lines
+            }
           }
-        } catch (e) {
-          console.error('Failed to parse stream data:', e)
         }
       }
-
-      eventSource.onerror = (error) => {
-        console.error('EventSource failed:', error)
-        eventSource.close()
-        setIsLoading(false)
-      }
-
-      // Wait for stream completion (manual timeout as fallback)
-      const timeout = setTimeout(() => {
-        eventSource.close()
-        setIsLoading(false)
-      }, 60000) // 60s max timeout
-
-      // Listen for completion marker
-      eventSource.addEventListener('end', () => {
-        clearTimeout(timeout)
-        eventSource.close()
-        setIsLoading(false)
-      })
+      
+      setIsLoading(false)
 
     } catch (err) {
       setMessages(prev =>
@@ -154,21 +180,20 @@ export default function ChatPage() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       {/* Sidebar */}
-      <aside
-        className={`fixed left-0 top-0 h-full w-80 bg-sidebar border-r transition-all duration-300 ${
-          showSettings ? 'translate-x-0' : '-translate-x-full'
-        } z-50`}
-        style={{ backgroundColor: 'var(--sidebar-bg)', borderColor: 'var(--border)' }}
-      >
-        <SettingsPanel
-          model={model}
-          setModel={setModel}
-          availableModels={availableModels}
-          theme={theme}
-          toggleTheme={toggleTheme}
-          onClose={() => setShowSettings(false)}
+      <ChatSidebar
+        apiUrl={API_URL}
+        selectedId={selectedChat}
+        onSelect={setSelectedChat}
+        onCreate={createChat}
+        onDelete={deleteChat}
+      />
+      {/* Settings panel overlay */}
+      {showSettings && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40"
+          onClick={() => setShowSettings(false)}
         />
-      </aside>
+      )}
 
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col ml-0 transition-all duration-200">

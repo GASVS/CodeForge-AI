@@ -33,7 +33,36 @@
 
 ## 🔁 ACTION LOG (newest last)
 
-### Session 2026-09-20 (this session)
+### Session 2026-09-20 (this session) — DOC REALIGNMENT (code untouched)
+- [✅] **A1** Verified reality vs docs (import test found blocking bug; git archaeology found App.tsx regression)
+- [✅] **A2** Rewrote `docs/project_plan.md` — now reflects actual state (Vite not Next.js; Week-3 backend DONE incl. SQLite chats + export; regression of `src/App.tsx` documented: live entry is 66-line stub, full working version at `b90c6ae:frontend/src/App.tsx`; no-.gitignore risk; ChatSidebar broken `@/types/chat` import; dead `frontend/frontend/` + `frontend/app/` trees). 11,430 B on disk, verified.
+- [✅] **A3** Wrote `docs/ACTION_PLAN.md` — full step-by-step plan P0–P5 (repo safety → restore chat app → hardening → code-aware core/RAG → polish → launch), each task with Steps / Verify / Done-when, plus v1.0 Definition of Done. 17,069 B on disk, verified.
+- [✅] **A4** P0.1 done — `.gitignore` created (private/, *env*, *.db*, venvs, node_modules, dist, caches). Sensitive artifacts MOVED to `private/runtime/`: `frontend/.env.local`, `codeforge.db{,-shm,-wal}` (dev server on :8001 killed first). `database.py` now points `DB_PATH` → `private/runtime/codeforge.db` (auto-creates dir); verified: DB opens at new path, table intact (0 rows — was empty anyway). `git status`: ZERO sensitive untracked files; `git ls-files`: zero tracked sensitive paths. LEFT IN PLACE (gitignored, moving breaks absolute paths inside): 3× venv/, node_modules/, dist/, __pycache__.
+- [✅] **A5** P0.2 done — `main.py`: `from . import database` → `import database`. Import test now clean, server boots via `uvicorn main:app`. **BUT NOT YET E2E-VERIFIED against the live frontend** (frontend is the stub — see A6).
+- [✅] **A6** FULL BACKEND FUNCTIONALITY AUDIT (server booted, every endpoint exercised, then shut down):
+  - ✅ `/health` → healthy; `/api/models` → 10 models listed
+  - ✅ Chat CRUD: create→list→rename+append (PUT)→get→export MD (`# title` + You/Assistant sections, correct)→export JSON→delete→final count 0→404 on missing. **Persistence works; data landed in `private/runtime/codeforge.db` (new path confirmed working).**
+  - ✅ Multi-file upload (2 files)→list→fetch content→delete both→list empty→404 on missing id
+  - ✅ **Code-aware streaming E2E**: uploaded `greet` function, asked "what does greet return for X?" with `file_ids` → model replied: *It returns the string "Hello " concatenated with X.* (RAG-via-concat path genuinely works)
+  - ✅ Non-streaming `POST /api/chat` → `{"type":"text","content":"PONG"}`
+  - ✅ CORS preflight ok for origin :3000 (note: allow_origins still `*` — P2.1)
+  - ✅ SSE frame hygiene: frames `data: {"text":...}`, ends `data: [DONE]`
+  - 🐛 BUG NEW: bad `model_name` (no-such-model) → **200 + "No response from model"** (misleading; should be 502/400 "model not found" — Ollama returns 404, we swallow it in call_ollama's `.get("response","No response...")`)
+  - 🐛 BUG CONFIRMED (known): `call_openrouter` still `NotImplementedError` → 500 when `OPENROUTER_API_KEY` set
+  - 🐛 LEAK FOUND: `/tmp/jev-uploads/` accumulates stale files across sessions (3 old test files found) — no cleanup
+  - ⚠️ Frontend live entry STILL the 66-line stub (tsc clean, `npm run build` green: 31 modules, 145 kB JS) — so NONE of the verified backend features are reachable in the running UI. Restore App.tsx (P1.1) is the critical path.
+- [📌] ENV CHECK (2026-09-20): Ollama UP. Models: gpt-oss-20b (×3), qwen3.8-27b-96k, qwen3.8:27b, qwen3.5-9b/27b (64k/96k variants). Default model in code (`qwen3.5-9b-64k`) EXISTS ✅ — stale default risk lower than suspected.
+- [✅] **A7.1 DONE — live stack E2E VERIFIED.** Restored App.tsx (487 L) → tsc clean → **found+fixed 2 more bugs while trying to boot**: (a) `start.sh:33` had an **unclosed quote** on the models-line `|| echo "..."` fallback → bash parsed the rest of the script as a string, **nothing after line 33 ever executed** (this is why start.sh had been silently broken beyond the import bug); fixed, `bash -n` OK. (b) (import bug was already fixed in A5). Boot now works: backend :8001 + vite :3000 both up via start.sh.
+- [✅] **A7.2 DONE — full-stack E2E through the FRONTEND (vite :3000 proxy → :8001)**: `GET :3000/src/App.tsx` serves the RESTORED app (markers: EventSource=1, stream/api/chat=1, file_ids=1, api/models=1); proxy upload via `:3000/api/upload` → 200 w/ file id; streaming chat via `:3000/stream/api/chat` with `file_ids` → 200 (answered from context; empty-text one round was the qwen think-gap, frames end `[DONE]`); CORS ok. **The verified backend features are now reachable in the running UI.** Stack shut down + temp files cleaned after test.
+- [⬜] **A7 NEXT** Critical path to "full working app":
+  1. ~~**P1.1** restore App.tsx + boot + E2E~~ ✅ DONE (A7.1 + A7.2)
+  2. **P1.3** Create `frontend/types/chat.ts` + wire ChatSidebar (the backend CRUD it needs is verified working, A6)
+  3. **P2.2** Bad-model fix: in `call_ollama`, check `response.status_code` → raise clean error (502 "model not found: X") instead of returning 200 + "No response from model"
+  4. **P2.1** CORS tighten (currently `*`), upload size limit + start-of-session purge of `/tmp/jev-uploads/*`
+  5. Log each one here as done. Full ordered list: `docs/ACTION_PLAN.md`.
+- [📌] RULE re-affirmed: log ONE action at a time the moment it finishes (crashes lose unlogged work).
+
+### Prior session tasks (from old plan table, context only)
 - [✅] **1** Restored missing `interface Message {` declaration — `frontend/src/App.tsx:15`
 - [✅] **2** Pointed component imports at `frontend/components/` (real location)
 - [✅] **3** API_URL now Vite-correct (`import.meta.env?.VITE_API_URL || http://localhost:8001`)
