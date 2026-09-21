@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 import httpx
 import os
+import time
 from typing import Optional, AsyncGenerator, List
 import json
 import uuid
@@ -31,13 +32,66 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Temporary storage for uploaded files
-UPLOAD_DIR = "/tmp/jev-uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/tmp/jev-uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# CORS origins — localhost dev by default, override for prod with e.g.
+# ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    if o.strip()
+]
+
+# Upload policy
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB per file
+MAX_FILES_PER_REQUEST = 10
+CHUNK_SIZE = 256 * 1024  # read uploads in bounded chunks (reject > limit without buffering all)
+ALLOWED_EXTENSIONS = {
+    "py", "js", "ts", "jsx", "tsx", "mjs", "cjs",
+    "rb", "go", "rs", "java", "kt", "swift", "c", "cpp", "h", "hpp",
+    "cs", "php", "sh", "bash", "zsh", "ps1",
+    "html", "css", "scss", "vue", "svelte",
+    "json", "yml", "yaml", "toml", "xml", "sql", "md", "txt", "csv", "ini", "env",
+}
+
+
+def _allowed_code_filename(filename: str) -> Optional[str]:
+    """Return a sanitized basename if the extension is code/text, else None."""
+    base = filename.replace("\\", "/").rsplit("/", 1)[-1]  # strip any path
+    base = base.replace("\x00", "").strip()
+    if not base or base in (".", ".."):
+        return None
+    ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        return None
+    return base
+
+
+def _looks_binary(chunk: bytes) -> bool:
+    """Cheap text sniff: NUL bytes in the first chunk ⇒ binary."""
+    return b"\x00" in chunk
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown event handler"""
+    # Startup: purge stale uploaded files (> 7 days)
+    try:
+        removed = 0
+        cutoff = time.time() - 7 * 86400
+        for entry in os.scandir(UPLOAD_DIR):
+            try:
+                if time.time_ns() // 1_000_000_000 < cutoff and entry.is_file():
+                    os.remove(entry.path)
+                    removed += 1
+            except OSError:
+                pass
+        if removed:
+            print(f"🧹 Purged {removed} stale upload file(s) from {UPLOAD_DIR}")
+    except Exception as e:
+        print(f"⚠️ Upload purge failed: {e}")
+
     # Startup: check Ollama
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -58,10 +112,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS for frontend (localhost:3000)
+# CORS for frontend (localhost:3000 by default; override via ALLOWED_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production to http://localhost:3000 and domain
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,34 +136,78 @@ uploaded_files_store: dict = {}
 
 @app.post("/api/upload")
 async def upload_file(files: List[UploadFile] = File(...)):
-    """Upload code files for analysis. Returns file IDs that can be referenced in chat."""
+    """Upload code files for analysis. Returns file IDs that can be referenced in chat.
+
+    Enforces: ≤10 files/request, ≤2 MB/file (413), code/text extension (415),
+    text sniff (415), sanitized basename (no path traversal).
+    """
+    if len(files) > MAX_FILES_PER_REQUEST:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Maximum {MAX_FILES_PER_REQUEST} files per request",
+        )
+
     uploaded_files = []
-    
-    for file in files[:10]:  # Limit to 10 files
+    for file in files:
+        safe_name = _allowed_code_filename(file.filename or "")
+        if safe_name is None:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported file type: {file.filename!r} (code/text files only)",
+            )
+
         file_id = str(uuid.uuid4())[:8]
-        filename = f"{file_id}_{file.filename}"
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        
+        file_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
+
+        chunks: List[bytes] = []
+        total = 0
+        first_chunk: Optional[bytes] = None
         try:
-            content = await file.read()
-            with open(file_path, 'wb') as f:
-                f.write(content)
-            
-            uploaded_files_store[file_id] = {
-                "filename": file.filename,
-                "path": file_path,
-                "size": len(content),
-                "content": content.decode('utf-8', errors='ignore')
-            }
-            
-            uploaded_files.append({
-                "id": file_id,
-                "filename": file.filename,
-                "size": len(content)
-            })
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                if len(chunk) and first_chunk is None:
+                    first_chunk = chunk
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File exceeds {MAX_UPLOAD_BYTES // (1024*1024)} MB limit",
+                    )
+                chunks.append(chunk)
+        except HTTPException:
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to upload {file.filename}: {str(e)}")
-    
+            raise HTTPException(status_code=500, detail=f"Failed to upload {safe_name}: {e}")
+
+        if first_chunk is not None and _looks_binary(first_chunk):
+            raise HTTPException(
+                status_code=415,
+                detail=f"{safe_name} looks binary — only text/code files are supported",
+            )
+
+        content = b"".join(chunks)
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        uploaded_files_store[file_id] = {
+            "filename": safe_name,
+            "path": file_path,
+            "size": total,
+            "content": content.decode("utf-8", errors="ignore"),
+            "created_at": time.time(),
+        }
+
+        uploaded_files.append(
+            {"id": file_id, "filename": safe_name, "size": total}
+        )
+
     return {"files": uploaded_files}
 
 
@@ -199,12 +297,19 @@ async def chat(request: ChatRequest):
             status_code=503, 
             detail="Cannot connect to Ollama. Make sure it's running: `ollama serve`"
         )
+    except HTTPException:
+        # Clean errors (e.g. 502 model-not-found from call_ollama) pass through as-is
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 async def call_ollama(prompt: str, model_name: str) -> str:
-    """Call local Ollama API (non-streaming)"""
+    """Call local Ollama API (non-streaming).
+
+    Raises HTTPException(502) if the model is unknown or Ollama errors,
+    instead of letting Ollama's error payload surface as a fake 200.
+    """
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             f"{OLLAMA_BASE_URL}/api/generate",
@@ -214,14 +319,29 @@ async def call_ollama(prompt: str, model_name: str) -> str:
                 "stream": False,  # Non-streaming for simple endpoint
             }
         )
-        
+
+        if response.status_code in (400, 404):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Model '{model_name}' not available in Ollama",
+            )
+        if response.status_code >= 500:
+            raise HTTPException(status_code=502, detail=f"Ollama error: HTTP {response.status_code}")
+
         result = response.json()
-        return result.get("response", "No response from model")
+        if result.get("error"):
+            raise HTTPException(status_code=502, detail=f"Ollama error: {result['error']}")
+        return result.get("response", "")
 
 
 async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, None]:
-    """Stream responses from Ollama in real-time"""
-    buffer = ""
+    """Stream responses from Ollama in real-time.
+
+    Errors (unknown model, Ollama down, 5xx) are delivered as a single
+    SSE `error` frame followed by `[DONE]`, so the frontend can render an
+    error card instead of hanging on an empty stream.
+    """
+    emitted_done = False
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
@@ -233,23 +353,36 @@ async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, Non
                     "stream": True,  # Enable streaming
                 }
             ) as response:
+                if response.status_code in (400, 404):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Model '{model_name}' not available in Ollama",
+                    )
+                if response.status_code >= 500:
+                    raise HTTPException(status_code=502, detail=f"Ollama error: HTTP {response.status_code}")
+
                 async for line in response.aiter_lines():
                     if line:
                         try:
                             data = json.loads(line)
-                            if "response" in data:
-                                chunk = data["response"]
-                                buffer += chunk
+                            if data.get("error"):
+                                raise RuntimeError(str(data["error"]))
+                            chunk = data.get("response")
+                            if chunk:
                                 yield f"data: {json.dumps({'text': chunk})}\n\n"
-                
                             if data.get("done", False):
+                                emitted_done = True
                                 yield "data: [DONE]\n\n"
                                 return
                         except json.JSONDecodeError as e:
-                            logger.error(f"Failed to parse line: {line}, error: {e}")
-                            continue
+                            # Ollama may send a plain-text error line; surface it
+                            logger.error(f"Unparseable stream line: {line}, error: {e}")
+                            if line and not line.startswith("{"):
+                                raise RuntimeError(line)
     except Exception as e:
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        if not emitted_done:
+            yield "data: [DONE]\n\n"
 
 
 @app.get("/stream/api/chat")
@@ -286,10 +419,10 @@ async def stream_chat(
 
 
 async def call_openrouter(prompt: str) -> str:
-    """Call OpenRouter API (free/paid models)"""
-    # Future implementation: add cloud model support via OpenRouter
-    raise NotImplementedError(
-        "Cloud model integration coming Week 2. Use Ollama for now."
+    """OpenRouter is not shipped in v1.0 — fail cleanly instead of raising raw."""
+    raise HTTPException(
+        status_code=501,
+        detail="OpenRouter support coming in v1.1 — unset OPENROUTER_API_KEY to use your local Ollama models",
     )
 
 
