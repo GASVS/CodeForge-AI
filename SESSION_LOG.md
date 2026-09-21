@@ -3,7 +3,7 @@
 > **RULE: After EVERY completed action, append/update its status below before moving on.**
 > If the session crashes, the next session reads this file FIRST and resumes from here.
 
-**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-09-21: Weeks 1–3 shipped (chat + streaming + file context + SQLite persistence + export), repo cleaned of dead tree, backend hardened (P2.1+P2.2).** **Current objective: P2.3 (streaming Stop button + thinking indicator) → P2.4 (tests + CI) → Phase 3 code-aware core (folder import / RAG / code actions) → Phase 4 polish → Phase 5 launch.**
+**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-09-21 (end-of-session update):** Weeks 1–3 shipped; repo cleaned; backend hardened (P2.1+P2.2); **P2.3 done (93e48d3)**. **Current objective: P2.4 (tests + CI) → Phase 3 code-aware core (folder import / RAG / code actions) → P3.4 settings → Phase 4 polish → Phase 5 launch.**
 
 ---
 
@@ -34,6 +34,7 @@
 | 21 | P2.1: uploads persist across restart (SQLite) | ✅ DONE | 0c93d2d (upload→restart→list verified) |
 | 22 | P0.4: fix build.sh (masked pytest, broken cp) | ✅ DONE | e65a718 (green, dist/index.html) |
 | 23 | Logs tab: in-app live runtime logs (backend `/api/logs` + `LogsPanel` + start.sh capture) | ✅ DONE | 8ac4b3a (verified live: /api/logs merges vite tail + in-process buffer; tsc/build green) |
+| 24 | P2.3: streaming Stop button + thinking indicator + stall watchdog | ✅ DONE | 93e48d3 (verified live: happy stream, mid-stream abort→server healthy, error-frame card, cold-think gap covered) |
 
 ---
 
@@ -73,7 +74,7 @@
 - [✅] **L2** `start.sh`: uvicorn + `npm run dev` output now tee'd to `private/runtime/{api_server.log,vite_dev.log}` (line-buffered via `stdbuf -oL` when available) → vite/npm logs land in the files instead of being lost to the terminal. `bash -n` clean.
 - [✅] **L3** Frontend: new `frontend/components/LogsPanel.tsx` (dark log pane, auto-refresh every 2 s, auto-scroll, error state if backend down) + header `>_` terminal button in `App.tsx` toggles it (emerald highlight when open).
 - [✅] **L4** Verified: `npx tsc --noEmit` clean, `npm run build` green (326 kB bundle). Live E2E: booted uvicorn on :8002 → `/health` 200 → `/api/logs` returned vite tail lines + in-process httpx log lines → killed server, removed temp test artifacts.
-- [📌] **NEXT (unchanged order):** P2.3 streaming Stop button + thinking indicator → P2.4 tests + CI → Phase 3 (folder import / RAG / code actions).
+- [📌] **NEXT:** ~~P2.3~~ (93e48d3) → **P2.4 tests + CI** → Phase 3 (folder import / RAG / code actions) → P3.4 settings → Phase 4 polish → Phase 5 docs/launch.
 - [📌] ENV: Ollama models include `qwen3.5:9b` (fast, good for E2E — reply "PONG" in ~1s) and `qwen3.8-27b-96k` (thinking model, long empty-gap — use `qwen3.5:9b` for quick tests). Bad-model tests work with `no-such-model-xyz`.
 
 ### Prior session tasks (from old plan table, context only)

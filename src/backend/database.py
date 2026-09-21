@@ -100,11 +100,12 @@ def list_conversations(limit: int = 100) -> list[dict]:
 
 
 def get_conversation(chat_id: str) -> dict | None:
+    """Full chat INCLUDING messages (the list endpoint only wants summaries)."""
     with _lock:
         row = get_db().execute(
             "SELECT * FROM conversations WHERE id = ?", (chat_id,)
         ).fetchone()
-    return _summarize(row) if row else None
+    return _row_to_dict(row) if row else None
 
 
 def create_conversation(title: str | None = None,

@@ -10,19 +10,20 @@ cd "$(dirname "$0")"
 echo "🔧 Backend: installing dependencies…"
 source ./venv/bin/activate
 pip install -q -r src/backend/requirements.txt
+pip install -q -r src/backend/requirements-dev.txt
 
 # Smoke-check that the API module imports cleanly (catches import regressions
 # without needing a running server).
 python -c "import sys; sys.path.insert(0, 'src/backend'); import main; print('✅ backend imports OK')"
 
-# Run the test suite if any backend tests exist; once the P2.4 tests land,
-# this gate enforces that they pass (an empty suite must not fail the build).
-TEST_FILE=$(find tests -maxdepth 1 -name 'test_*.py' 2>/dev/null | head -n1)
+# Run the backend test suite if tests exist (src/backend/tests/). Subshell so
+# the cwd is unchanged for the frontend steps that follow.
+TEST_FILE=$(find src/backend/tests -maxdepth 1 -name 'test_*.py' 2>/dev/null | head -n1)
 if [ -n "$TEST_FILE" ]; then
   echo "🧪 Running backend tests…"
-  python -m pytest tests/ -q
+  (cd src/backend && ../../venv/bin/python -m pytest tests/ -q)
 else
-  echo "⚠️  No backend tests yet (tests/ is empty) — skipping (expected pre-P2.4)."
+  echo "⚠️  No backend tests yet — skipping."
 fi
 
 deactivate
