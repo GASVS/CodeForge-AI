@@ -82,6 +82,7 @@ function App() {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [streamStarted, setStreamStarted] = useState(false);
   const [model, setModel] = useState('qwen3.5-9b-64k:latest');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
@@ -94,6 +95,8 @@ function App() {
   const [chats, setChats] = useState<any[]>([]);
   const [showSidebar, setShowSidebar] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Live reference to the active SSE stream so the Stop button can abort it
+  const streamRef = useRef<{ es: EventSource; close: (reason?: 'done' | 'stop' | 'timeout') => void } | null>(null);
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -247,6 +250,7 @@ function App() {
 
     setInput('');
     setIsLoading(true);
+    setStreamStarted(false);
 
     const assistantMsgId = (Date.now() + 1).toString();
     const assistantMsg: Message = {
@@ -289,6 +293,58 @@ function App() {
       }
     }
 
+    const persistFinal = (finalContent: string) => {
+      if (!chatId || !finalContent) return;
+      persistChat(chatId, nextMessages.map(m =>
+        m.id === assistantMsgId ? { ...m, content: finalContent } : m
+      ));
+    };
+
+    const setContent = (text: string) => {
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === assistantMsgId ? { ...msg, content: text } : msg
+        )
+      );
+    };
+
+    let finished = false;
+    let fullContent = '';
+    let streamError: string | null = null;
+
+    // Reset the no-progress watchdog on every received frame
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    const armWatchdog = (ms: number = 20000) => {
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        // No data for 20 s → model is hung / connection died → fail soft
+        streamError = streamError || 'No response from the model — the stream stalled.';
+        setContent(
+          (fullContent ? fullContent + '\n\n' : '') +
+            '⚠️ ' + streamError
+        );
+        finish('stall');
+      }, ms);
+    };
+
+    const finish = (kind: 'done' | 'stop' | 'timeout' | 'stall' = 'done') => {
+      if (finished) return;
+      finished = true;
+      if (watchdog) clearTimeout(watchdog);
+      streamRef.current = null;
+      setIsLoading(false);
+      if (kind !== 'done') {
+        // stopped/stalled: keep the partial answer + a short note
+        const note =
+          kind === 'stop' ? (fullContent ? '\n\n⏹ — generation stopped' : '⏹ — stopped before any text arrived')
+          : (fullContent ? '\n\n⚠️ ' + (streamError || 'Generation timed out.')
+          : '⚠️ ' + (streamError || 'Generation timed out. The model may still be thinking — try again.'));
+        setContent(fullContent + note);
+        fullContent = fullContent + note;
+      }
+      persistFinal(fullContent);
+    };
+
     try {
       // Use SSE streaming for real-time updates
       const fileIds = Array.from(selectedFiles).join(',');
@@ -296,42 +352,31 @@ function App() {
         `${API_URL}/stream/api/chat?message=${encodeURIComponent(content)}&model_name=${encodeURIComponent(model)}&file_ids=${encodeURIComponent(fileIds)}`
       );
 
-      let fullContent = '';
-      let finished = false;
-
-      const finishStream = () => {
-        if (finished) return;
-        finished = true;
-        eventSource.close();
-        setIsLoading(false);
-        if (chatId && fullContent) {
-          persistChat(chatId, nextMessages.map(m =>
-            m.id === assistantMsgId ? { ...m, content: fullContent } : m
-          ));
-        }
-      };
-
       eventSource.onmessage = (event) => {
         if (event.data === '[DONE]') {
-          finishStream();
+          finish();
+          try { eventSource.close(); } catch { /* already closed */ }
           return;
         }
         try {
           const data = JSON.parse(event.data);
           if (data.text) {
+            if (!streamStarted) {
+              // First real token: thinking phase is over, drop the indicator
+              setStreamStarted(true);
+            }
+            armWatchdog();
             fullContent += data.text;
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === assistantMsgId ? { ...msg, content: fullContent } : msg
-              )
-            );
+            setContent(fullContent);
           } else if (data.error) {
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === assistantMsgId ? { ...msg, content: `Error: ${data.error}` } : msg
-              )
+            streamError = data.error;
+            setContent(
+              (fullContent ? fullContent + '\n\n' : '') +
+                '⚠️ ' + data.error
             );
-            finishStream();
+            fullContent = fullContent + (fullContent ? '\n\n' : '') + '⚠️ ' + data.error;
+            try { eventSource.close(); } catch { /* noop */ }
+            finish('done'); // treated as complete: error already rendered inline
           }
         } catch (e) {
           console.error('Failed to parse stream data:', e);
@@ -340,29 +385,38 @@ function App() {
 
       eventSource.onerror = (error) => {
         console.error('EventSource failed:', error);
-        if (chatId && fullContent) {
-          persistChat(chatId, nextMessages.map(m =>
-            m.id === assistantMsgId ? { ...m, content: fullContent } : m
-          ));
-        }
-        finishStream();
+        if (finished) return; // Stop/timeout already handled it
+        streamError = streamError || 'Lost connection to the model while streaming.';
+        setContent(
+          (fullContent ? fullContent + '\n\n' : '') +
+            '⚠️ ' + streamError
+        );
+        fullContent = fullContent + (fullContent ? '\n\n' : '') + '⚠️ ' + streamError;
+        finish();
       };
 
-      // Timeout fallback
-      setTimeout(() => {
-        finishStream();
-      }, 120000);
+      // Expose the stream handle so the Stop button can abort mid-stream
+      streamRef.current = {
+        es: eventSource,
+        close: (reason?: 'done' | 'stop' | 'timeout') => {
+          try { eventSource.close(); } catch { /* noop */ }
+          finish(reason === 'done' ? 'done' : reason || 'stop');
+        },
+      };
+
+      armWatchdog(30000); // first frame can take longer on a cold model
     } catch (error) {
       console.error('Chat error:', error);
-      setMessages(prev =>
-        prev.map(msg =>
-          msg.id === assistantMsgId
-            ? { ...msg, content: '❌ Error: Cannot connect to backend. Make sure it\'s running on http://localhost:8001' }
-            : msg
-        )
+      setContent(
+        "❌ Error: Cannot connect to backend. Make sure it's running on http://localhost:8001"
       );
       setIsLoading(false);
     }
+  };
+
+  const handleStop = () => {
+    // Abort the live stream; partial text is kept + persisted
+    streamRef.current?.close('stop');
   };
 
   const clearChat = () => {
@@ -612,17 +666,6 @@ function App() {
                 </div>
               );
             })}
-
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className={`${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'} border p-4 rounded-2xl`}>
-                  <div className="flex gap-2 items-center">
-                    <span className="animate-spin">⟳</span>
-                    <span className="opacity-60">Thinking...</span>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -671,6 +714,21 @@ function App() {
             )}
           </button>
 
+          {/* thinking indicator: only while waiting for the first token */}
+          {isLoading && !streamStarted && (
+            <div className="flex items-center gap-2 opacity-70">
+              <span className="inline-flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce"
+                    style={{ animationDelay: `${i * 0.18}s` }}
+                  />
+                ))}
+              </span>
+              <span className="text-xs">Thinking…</span>
+            </div>
+          )}
           <input
             type="text"
             value={input}
@@ -681,13 +739,25 @@ function App() {
             className={`flex-1 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'} border rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors`}
           />
 
-          <button
-            onClick={() => sendMessage(input)}
-            disabled={!input.trim() || isLoading}
-            className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center justify-center min-w-[48px]"
-          >
-            <SendIcon />
-          </button>
+          {isLoading ? (
+            <button
+              onClick={handleStop}
+              className="p-3 bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors flex items-center justify-center min-w-[48px]"
+              title="Stop generation"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={() => sendMessage(input)}
+              disabled={!input.trim()}
+              className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center justify-center min-w-[48px]"
+            >
+              <SendIcon />
+            </button>
+          )}
         </div>
       </div>
     </div>
