@@ -3,7 +3,7 @@
 > **RULE: After EVERY completed action, append/update its status below before moving on.**
 > If the session crashes, the next session reads this file FIRST and resumes from here.
 
-**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-09-21 (end-of-session update):** Weeks 1–3 shipped; repo cleaned; backend hardened (P2.1+P2.2); **P2.3 done (93e48d3)**. **Current objective: P2.4 (tests + CI) → Phase 3 code-aware core (folder import / RAG / code actions) → P3.4 settings → Phase 4 polish → Phase 5 launch.**
+**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-09-21 (end-of-session update):** Weeks 1–3 shipped; repo cleaned; backend hardened (P2.1+P2.2); **P2.3 done (93e48d3)**; **P2.4 done (8179ee0)** — 10 backend tests, 4 vitest, CI workflow (green on push). **Current objective: Phase 3 code-aware core (folder import / RAG / code actions) → P3.4 settings → Phase 4 polish → Phase 5 launch.**
 
 ---
 
@@ -35,6 +35,8 @@
 | 22 | P0.4: fix build.sh (masked pytest, broken cp) | ✅ DONE | e65a718 (green, dist/index.html) |
 | 23 | Logs tab: in-app live runtime logs (backend `/api/logs` + `LogsPanel` + start.sh capture) | ✅ DONE | 8ac4b3a (verified live: /api/logs merges vite tail + in-process buffer; tsc/build green) |
 | 24 | P2.3: streaming Stop button + thinking indicator + stall watchdog | ✅ DONE | 93e48d3 (verified live: happy stream, mid-stream abort→server healthy, error-frame card, cold-think gap covered) |
+| 25 | P2.4: backend pytest suite (10 tests) + Vitest port (4 tests) + CI workflow | ✅ DONE | 8179ee0 (10 passed local; 4/4 vitest; tsc/build green; build.sh e2e exit 0; **CI green on push** — needs a user remote) |
+| 26 | Fixed bug surfaced by P2.4: `get_conversation` returned summary dict → `GET /api/chats/{id}` missing messages | ✅ DONE | 8179ee0 (chat-load + export now return full messages) |
 
 ---
 
