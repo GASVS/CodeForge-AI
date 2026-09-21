@@ -33,6 +33,7 @@
 | 20 | P2.2: clean 502 on bad model + 501 OpenRouter | ✅ DONE | 12a1aa7 (verified live: 502 + 501) |
 | 21 | P2.1: uploads persist across restart (SQLite) | ✅ DONE | 0c93d2d (upload→restart→list verified) |
 | 22 | P0.4: fix build.sh (masked pytest, broken cp) | ✅ DONE | e65a718 (green, dist/index.html) |
+| 23 | Logs tab: in-app live runtime logs (backend `/api/logs` + `LogsPanel` + start.sh capture) | ✅ DONE | 2b?? (verified live: /api/logs merges vite tail + in-process buffer; tsc/build green) |
 
 ---
 
@@ -67,7 +68,13 @@
   5. ~~**P1.4** Delete dead tree~~ ✅ DONE (7020e59): removed `frontend/app/` (Next page/layout/globals), `frontend/frontend/` (broken jest tree), `frontend/.next/`, `components/FileUploader.tsx` (dup of FileContext), unused `src/globals.css`. Confirmed zero live references (grep: only `app/page.tsx` self-imports; main.tsx is the sole live entry). tsc clean, build green.
 - [📌] **REMAINING (v1.0 path, in order)**: P2.3 streaming Stop button + thinking indicator (App.tsx has a 120 s timeout + spinner but no Stop/abort + no thinking dot yet); P2.4 tests+CI (backend `pytest` + vitest + `.github/workflows/ci.yml`); P3 code-aware core (folder import / RAG / 4 code actions); P3.4 model+temp settings; then Phase 4 polish + Phase 5 docs/launch.
 - [📌] RULE re-affirmed: log ONE action at a time the moment it finishes (crashes lose unlogged work).
-- [⚠️] ENV: Ollama models include `qwen3.5:9b` (fast, good for E2E — reply "PONG" in ~1s) and `qwen3.8-27b-96k` (thinking model, long empty-gap — use `qwen3.5:9b` for quick tests). Bad-model tests work with `no-such-model-xyz`.
+### Session 2026-09-21 (this session) — LOGS TAB (in-app live runtime logs)
+- [✅] **L1** Backend: in-process logging ring buffer (1000 lines) + rotating `private/runtime/app.log` (1 MB × 2) wired to root logger in `main.py`; `GET /api/logs` endpoint returns merged lines (bounded 64 KB tails of `api_server.log`/`vite_dev.log` from `private/runtime/` + ring buffer). Removed 3 duplicate unused imports while editing.
+- [✅] **L2** `start.sh`: uvicorn + `npm run dev` output now tee'd to `private/runtime/{api_server.log,vite_dev.log}` (line-buffered via `stdbuf -oL` when available) → vite/npm logs land in the files instead of being lost to the terminal. `bash -n` clean.
+- [✅] **L3** Frontend: new `frontend/components/LogsPanel.tsx` (dark log pane, auto-refresh every 2 s, auto-scroll, error state if backend down) + header `>_` terminal button in `App.tsx` toggles it (emerald highlight when open).
+- [✅] **L4** Verified: `npx tsc --noEmit` clean, `npm run build` green (326 kB bundle). Live E2E: booted uvicorn on :8002 → `/health` 200 → `/api/logs` returned vite tail lines + in-process httpx log lines → killed server, removed temp test artifacts.
+- [📌] **NEXT (unchanged order):** P2.3 streaming Stop button + thinking indicator → P2.4 tests + CI → Phase 3 (folder import / RAG / code actions).
+- [📌] ENV: Ollama models include `qwen3.5:9b` (fast, good for E2E — reply "PONG" in ~1s) and `qwen3.8-27b-96k` (thinking model, long empty-gap — use `qwen3.5:9b` for quick tests). Bad-model tests work with `no-such-model-xyz`.
 
 ### Prior session tasks (from old plan table, context only)
 - [✅] **1** Restored missing `interface Message {` declaration — `frontend/src/App.tsx:15`

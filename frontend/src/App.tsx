@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import SettingsPanel from '../components/SettingsPanel';
 import ChatSidebar from '../components/ChatSidebar';
+import LogsPanel from '../components/LogsPanel';
 import FileContext from './FileContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -84,6 +85,7 @@ function App() {
   const [model, setModel] = useState('qwen3.5-9b-64k:latest');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
@@ -414,6 +416,11 @@ function App() {
           </div>
         </div>
       </aside>
+      {/* Logs panel (toggle from header) */}
+      {showLogs && (
+        <LogsPanel apiUrl={API_URL} theme={theme} onClose={() => setShowLogs(false)} />
+      )}
+
       {/* Settings Sidebar */}
       {showSettings && (
         <>
@@ -454,6 +461,16 @@ function App() {
               title="Settings"
             >
               <SettingsIcon />
+            </button>
+            <button
+              onClick={() => setShowLogs((v) => !v)}
+              className={`p-2 rounded-lg transition-colors ${showLogs ? 'bg-emerald-600 text-white' : 'hover:bg-slate-800'}`}
+              title="Runtime logs (live)"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="4 17 10 11 4 5" />
+                <line x1="12" y1="19" x2="20" y2="19" />
+              </svg>
             </button>
             <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
               Jev Open Source Dashboard

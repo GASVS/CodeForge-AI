@@ -21,8 +21,41 @@ import shutil
 import database
 
 import logging as logging_module
+from collections import deque
+from logging.handlers import RotatingFileHandler
 
 logging_module.basicConfig(level=logging_module.INFO)
+
+# --- Runtime log capture (for the in-app Logs tab) ------------------------
+# An in-process ring buffer AND a rotating on-disk file. The /api/logs
+# endpoint merges this with the captured server logs (api_server.log /
+# vite_dev.log) so the UI shows the full runtime story, most-recent last.
+LOG_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "private",
+    "runtime",
+)
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE_PATH = os.path.join(LOG_DIR, "app.log")
+
+LOG_BUFFER: deque = deque(maxlen=1000)
+
+
+class _InProcessBufferHandler(logging_module.Handler):
+    def emit(self, record: logging_module.LogRecord) -> None:
+        try:
+            line = self.format(record)
+            LOG_BUFFER.append(line)
+        except Exception:
+            pass
+
+
+for _handler in (_InProcessBufferHandler(),
+                 RotatingFileHandler(LOG_FILE_PATH, maxBytes=1_000_000, backupCount=2, encoding="utf-8")):
+    _handler.setFormatter(logging_module.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging_module.getLogger().addHandler(_handler)
+
 logger = logging_module.getLogger(__name__)
 
 from contextlib import asynccontextmanager
@@ -288,6 +321,41 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+# Log files written by start.sh (uvicorn + vite dev output), most-recent last.
+_RUNTIME_LOG_FILES = ("api_server.log", "vite_dev.log")
+_TAIL_BYTES = 64 * 1024  # only read the tail of each file (bounded read)
+
+
+def _read_tail(log_dir: str, name: str) -> List[str]:
+    path = os.path.join(log_dir, name)
+    if not os.path.isfile(path):
+        return []
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            if size > _TAIL_BYTES:
+                f.seek(size - _TAIL_BYTES)
+            raw = f.read()
+        text = raw.decode("utf-8", errors="replace")
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        return lines[-200:]
+    except OSError:
+        return []
+
+
+@app.get("/api/logs")
+async def api_logs():
+    """Recent runtime logs (in-process ring buffer + server/dev tails)."""
+    server_lines: List[str] = []
+    for name in _RUNTIME_LOG_FILES:
+        server_lines.extend(_read_tail(LOG_DIR, name))
+    lines = server_lines + list(LOG_BUFFER)
+    if not lines:
+        lines = [f"[{time.strftime('%H:%M:%S')}] (no log entries yet)"]
+    return {"lines": lines, "count": len(lines)}
+
 
 
 def add_file_context(message: str, context_files: List[str]) -> str:

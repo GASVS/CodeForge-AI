@@ -51,8 +51,10 @@ echo "Press Ctrl+C to stop all services"
 echo "---"
 echo ""
 
-# Start backend in background
-uvicorn main:app --host 0.0.0.0 --port 8001 &
+# Start backend in background (runtime output captured for /api/logs)
+LOG_DIR="$PROJECT_DIR/private/runtime"
+mkdir -p "$LOG_DIR"
+uvicorn main:app --host 0.0.0.0 --port 8001 2>&1 | tee -a "$LOG_DIR/api_server.log" &
 BACKEND_PID=$!
 
 sleep 2
@@ -66,9 +68,13 @@ else
     exit 1
 fi
 
-# Start frontend in background
+# Start frontend in background (runtime output captured for /api/logs)
 cd "$FRONTEND_DIR"
-npm run dev &
+if command -v stdbuf >/dev/null 2>&1; then
+    stdbuf -oL npm run dev 2>&1 | tee -a "$LOG_DIR/vite_dev.log" &
+else
+    npm run dev 2>&1 | tee -a "$LOG_DIR/vite_dev.log" &
+fi
 FRONTEND_PID=$!
 
 echo "✅ Frontend starting..."
