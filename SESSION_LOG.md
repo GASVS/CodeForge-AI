@@ -33,7 +33,7 @@
 | 20 | P2.2: clean 502 on bad model + 501 OpenRouter | ✅ DONE | 12a1aa7 (verified live: 502 + 501) |
 | 21 | P2.1: uploads persist across restart (SQLite) | ✅ DONE | 0c93d2d (upload→restart→list verified) |
 | 22 | P0.4: fix build.sh (masked pytest, broken cp) | ✅ DONE | e65a718 (green, dist/index.html) |
-| 23 | Logs tab: in-app live runtime logs (backend `/api/logs` + `LogsPanel` + start.sh capture) | ✅ DONE | 2b?? (verified live: /api/logs merges vite tail + in-process buffer; tsc/build green) |
+| 23 | Logs tab: in-app live runtime logs (backend `/api/logs` + `LogsPanel` + start.sh capture) | ✅ DONE | 8ac4b3a (verified live: /api/logs merges vite tail + in-process buffer; tsc/build green) |
 
 ---
 
