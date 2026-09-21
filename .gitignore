@@ -1,0 +1,22 @@
+# === Secrets & private local data (kept in /private, never committed) ===
+private/
+.env
+.env.local
+*.env
+*.db
+*.db-shm
+*.db-wal
+
+# === Python ===
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# === Node / frontend ===
+node_modules/
+dist/
+.next/
+*.log
+.eslintignore
