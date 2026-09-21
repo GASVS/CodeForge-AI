@@ -1,29 +1,43 @@
 #!/usr/bin/env bash
-# build.sh – Builds the frontend and backend of Jev Open Source Dashboard
-
+# build.sh – Build CodeForge AI: install backend deps, run tests (if any),
+# type-check + build the frontend (Vite), and stage it under dist/.
+#
 set -euo pipefail
 
-# Build the backend (FastAPI)
-echo "🔧 Building backend…"
-source ./venv/bin/activate
-pip install -r src/backend/requirements.txt
-pytest --maxfail=1 || true
+cd "$(dirname "$0")"
 
-# Build the frontend (Vite)
+# --- Backend --------------------------------------------------------------
+echo "🔧 Backend: installing dependencies…"
+source ./venv/bin/activate
+pip install -q -r src/backend/requirements.txt
+
+# Smoke-check that the API module imports cleanly (catches import regressions
+# without needing a running server).
+python -c "import sys; sys.path.insert(0, 'src/backend'); import main; print('✅ backend imports OK')"
+
+# Run the test suite if any backend tests exist; once the P2.4 tests land,
+# this gate enforces that they pass (an empty suite must not fail the build).
+TEST_FILE=$(find tests -maxdepth 1 -name 'test_*.py' 2>/dev/null | head -n1)
+if [ -n "$TEST_FILE" ]; then
+  echo "🧪 Running backend tests…"
+  python -m pytest tests/ -q
+else
+  echo "⚠️  No backend tests yet (tests/ is empty) — skipping (expected pre-P2.4)."
+fi
+
+deactivate
+
+# --- Frontend -------------------------------------------------------------
+echo "🎨 Frontend: type-checking + building…"
 cd frontend
-npm install
+npm ci --no-audit --no-fund
+npx tsc --noEmit
 npm run build
 
-# Create distribution directory
-mkdir -p dist
-# Copy built frontend to dist
-cp -r dist/* ../dist/
+# --- Stage distribution ----------------------------------------------------
+cd ..
+rm -rf dist
+cp -r frontend/dist dist
+echo "Built $(date -R)" > dist/BUILD_TIMESTAMP
 
-# Copy static files
-cp -r public/* ../dist/
-
-# Record build timestamp
-echo "Built $(date -R)" > ../dist/BUILD_TIMESTAMP
-
-# Done
-echo "✅ Build finished: frontend and backend ready under 'dist/'"
+echo "✅ Build finished — frontend staged under dist/"
