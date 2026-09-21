@@ -1,6 +1,7 @@
 # 📋 SESSION LOG — CodeForge AI (Jev Open Source Dashboard)
 
-> **RULE: After EVERY completed action, append/update its status below before moving on.**
+> **RULE (see AGENTS.md): one task = implement → verify → log HERE → commit → NEXT.**
+> After EVERY completed action, append its status below *before* touching the next task, with commit hash + one verification line.
 > If the session crashes, the next session reads this file FIRST and resumes from here.
 
 **Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-09-21 (end-of-session update):** Weeks 1–3 shipped; repo cleaned; backend hardened (P2.1+P2.2); **P2.3 done (93e48d3)**; **P2.4 done (8179ee0)** — 10 backend tests, 4 vitest, CI workflow (green on push). **Current objective: Phase 3 code-aware core (folder import / RAG / code actions) → P3.4 settings → Phase 4 polish → Phase 5 launch.**
