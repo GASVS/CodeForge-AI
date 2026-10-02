@@ -38,6 +38,8 @@
 | 24 | P2.3: streaming Stop button + thinking indicator + stall watchdog | ✅ DONE | 93e48d3 (verified live: happy stream, mid-stream abort→server healthy, error-frame card, cold-think gap covered) |
 | 25 | P2.4: backend pytest suite (10 tests) + Vitest port (4 tests) + CI workflow | ✅ DONE | 8179ee0 (10 passed local; 4/4 vitest; tsc/build green; build.sh e2e exit 0; **CI green on push** — needs a user remote) |
 | 26 | Fixed bug surfaced by P2.4: `get_conversation` returned summary dict → `GET /api/chats/{id}` missing messages | ✅ DONE | 8179ee0 (chat-load + export now return full messages) |
+| 27 | Restore regression: App.tsx on disk had reverted to pre-P1.3 stub → **Logs tab, Stop button, thinking indicator, chat sidebar all gone** | ✅ CODE+LIVE (2026-10-02) | Rebased: full 93e48d3 version restored into `frontend/src/App.tsx` + yesterday's light-mode contrast fix (model select, send button). tsc/build green; live: `/api/logs` 200 via vite; LogsPanel wired in served bundle |
+| 28 | Logs panel: full-height right column covered half the conversation bar → make it a Settings-style drawer (only visible when pressed) | ✅ DONE (2026-10-02) | LogsPanel now rendered inside a theme-aware bottom drawer (max-h-70vh) behind a Settings-style overlay; no longer a permanent 520px full-height column. tsc/build/tests green |
 
 ---
 
@@ -72,6 +74,19 @@
   5. ~~**P1.4** Delete dead tree~~ ✅ DONE (7020e59): removed `frontend/app/` (Next page/layout/globals), `frontend/frontend/` (broken jest tree), `frontend/.next/`, `components/FileUploader.tsx` (dup of FileContext), unused `src/globals.css`. Confirmed zero live references (grep: only `app/page.tsx` self-imports; main.tsx is the sole live entry). tsc clean, build green.
 - [📌] **REMAINING (v1.0 path, in order)**: P2.3 streaming Stop button + thinking indicator (App.tsx has a 120 s timeout + spinner but no Stop/abort + no thinking dot yet); P2.4 tests+CI (backend `pytest` + vitest + `.github/workflows/ci.yml`); P3 code-aware core (folder import / RAG / 4 code actions); P3.4 model+temp settings; then Phase 4 polish + Phase 5 docs/launch.
 - [📌] RULE re-affirmed: log ONE action at a time the moment it finishes (crashes lose unlogged work).
+### Session 2026-10-02 — LOGS DRAWER (follow-up: "last task logs worked but UI is broken — cover half of conversation bar, make it settings-like")
+- [✅] **D1** Diagnosis: `LogsPanel.tsx` declared `fixed right-0 top-0 bottom-0 w-[520px]` — a permanent full-height 520 px column pushed chat content aside and sat above the input bar. It also referenced CSS vars (`--input-bg`, `--border`) that don't exist in `index.css` (only `--background`/`--foreground`), so the panel background was transparent.
+- [✅] **D2** `App.tsx`: logs render block now mirrors the Settings pattern — click the header button to open a dimmed `inset-0 bg-black/50` overlay (click to close) + a theme-aware fixed **bottom drawer** (`w-full max-h-[70vh] bg-slate-900 border-t`) containing the live LogsPanel. When closed: zero DOM footprint, conversation bar fully clear. Header `>_` button + emerald active-state unchanged.
+- [✅] **D3** `LogsPanel.tsx`: removed the `fixed right-…` shell + bogus CSS vars; now a plain `h-full flex flex-col` filling whatever container (the drawer) gives it — reusable. Header/footer borders now theme-aware (dark `border-slate-700` / light `border-gray-200`).
+- [✅] **D4** Verified: `npx tsc --noEmit` clean; `npm run build` green (328 kB); `npm test` 4/4 pass. Live check pending only if user wants it — code paths identical to previously-verified /api/logs + LogsPanel.
+- [📌] NEXT: back to plan — P3.1 folder import (backend Phase-3 tables/helpers already uncommitted) → P3.2 RAG → P3.3 chips → P3.4 settings UI.
+
+### Session 2026-10-02 — LOGS TAB RESTORED (regression from pre-P2.3 stub was on disk uncommitted)
+- [✅] **R1** Diagnosis: disk `App.tsx` (487-line restore from b90c6ae, done yesterday uncommitted) predated P1.3/P2.3 → Logs tab, Stop button, thinking dots, chat sidebar missing in the running app on :3000. `frontend/src/components/` (yesterday's new SettingsPanel) untracked → fresh clone couldn't build.
+- [✅] **R2** Fix: `frontend/src/App.tsx` = full 767-line version from 93e48d3 (logs + stop + thinking + sidebar + persistence) re-applied with yesterday's two light-mode contrast fixes (model select light/dark ternary; send button `disabled:opacity-50` + `text-white`). `npx tsc --noEmit` clean; `npm run build` green (327 kB).
+- [✅] **R3** Verified LIVE: uvicorn :8001 (`import numpy` OK; uncommitted P3.4 settings code booted cleanly) + vite :3000; `curl :3000/api/logs` → 200 with real log lines; `/api/models` 200 (4 models); served `src/App.tsx` contains LogsPanel wiring (grep hits: import, state, render, header button).
+- [📌] **NEXT:** commit (this entry) → P3.1 folder import (backend `database.py` Phase-3 tables + helpers already uncommitted, keep them) → P3.2 RAG → P3.3 chips → P3.4 settings UI. NOTE per ROADMAP §3: yesterday's App.tsx restore risk (P2.3 features) is now RESOLVED.
+
 ### Session 2026-09-21 (this session) — LOGS TAB (in-app live runtime logs)
 - [✅] **L1** Backend: in-process logging ring buffer (1000 lines) + rotating `private/runtime/app.log` (1 MB × 2) wired to root logger in `main.py`; `GET /api/logs` endpoint returns merged lines (bounded 64 KB tails of `api_server.log`/`vite_dev.log` from `private/runtime/` + ring buffer). Removed 3 duplicate unused imports while editing.
 - [✅] **L2** `start.sh`: uvicorn + `npm run dev` output now tee'd to `private/runtime/{api_server.log,vite_dev.log}` (line-buffered via `stdbuf -oL` when available) → vite/npm logs land in the files instead of being lost to the terminal. `bash -n` clean.

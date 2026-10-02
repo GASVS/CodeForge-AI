@@ -48,11 +48,9 @@ export default function LogsPanel({ apiUrl, theme, onClose }: Props) {
 
   const mono = 'font-mono text-xs leading-5'
   return (
-    <div className="fixed right-0 top-0 bottom-0 w-[520px] max-w-full z-50 shadow-2xl flex flex-col"
-      style={{ backgroundColor: 'var(--input-bg)', borderLeft: '1px solid var(--border)' }}>
-      <div className="p-4 flex items-center justify-between"
-        style={{ borderBottom: '1px solid var(--border)' }}>
-        <h2 className="font-semibold text-base" style={{ color: 'var(--foreground)' }}>
+    <div className={`flex flex-col h-full ${theme === 'dark' ? 'text-slate-100' : 'text-gray-900'}`}>
+      <div className={`p-4 flex items-center justify-between ${theme === 'dark' ? 'border-slate-700' : 'border-gray-200'} border-b`}>
+        <h2 className="font-semibold text-base">
           Runtime Logs
           <span className="ml-2 align-middle inline-block w-2 h-2 rounded-full animate-pulse"
             style={{ backgroundColor: '#22c55e' }} />

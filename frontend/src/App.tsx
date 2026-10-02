@@ -470,9 +470,21 @@ function App() {
           </div>
         </div>
       </aside>
-      {/* Logs panel (toggle from header) */}
+      {/* Logs drawer (toggle from header) — like Settings: overlay, only rendered when open */}
       {showLogs && (
-        <LogsPanel apiUrl={API_URL} theme={theme} onClose={() => setShowLogs(false)} />
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowLogs(false)}
+          />
+          <div
+            className={`fixed bottom-0 left-0 right-0 z-50 shadow-2xl ${
+              theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+            } border-t max-h-[70vh] flex flex-col`}
+          >
+            <LogsPanel apiUrl={API_URL} theme={theme} onClose={() => setShowLogs(false)} />
+          </div>
+        </>
       )}
 
       {/* Settings Sidebar */}
@@ -536,7 +548,7 @@ function App() {
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className={`bg-slate-900 border ${borderColor} rounded-lg px-3 py-2 text-sm hover:border-indigo-500 transition-colors`}
+              className={`${theme === 'dark' ? 'bg-slate-900 text-slate-100' : 'bg-slate-100 text-slate-900'} border ${borderColor} rounded-lg px-3 py-2 text-sm hover:border-indigo-500 transition-colors`}
             >
               {availableModels.length > 0 ? (
                 availableModels.map((m) => (
@@ -753,7 +765,7 @@ function App() {
             <button
               onClick={() => sendMessage(input)}
               disabled={!input.trim()}
-              className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center justify-center min-w-[48px]"
+              className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center justify-center min-w-[48px] text-white"
             >
               <SendIcon />
             </button>
