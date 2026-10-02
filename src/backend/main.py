@@ -7,17 +7,25 @@ Week 1 MVP endpoints:
 - GET  /stream/api/chat — SSE streaming for real-time updates
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 import httpx
 import os
 import time
+import io
+import math
+import zipfile
+import sqlite3
+import numpy as np
 from typing import Optional, AsyncGenerator, List
 import json
 import uuid
 import shutil
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import database
 
 import logging as logging_module
@@ -79,6 +87,7 @@ ALLOWED_ORIGINS = [
 # Upload policy
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB per file
 MAX_FILES_PER_REQUEST = 10
+MAX_PROJECT_BYTES_TOTAL = 25 * 1024 * 1024  # total zip upload cap for project imports
 CHUNK_SIZE = 256 * 1024  # read uploads in bounded chunks (reject > limit without buffering all)
 ALLOWED_EXTENSIONS = {
     "py", "js", "ts", "jsx", "tsx", "mjs", "cjs",
@@ -312,6 +321,225 @@ async def delete_file(file_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Projects (folder imports) — P3.1
+#
+# Endpoint contract: import a project by JSON `{name, files: [{path, content}]}`
+# or by uploading a zip; the walk skips node_modules/.git/venv/lockfiles, files
+# over 2 MB, disallowed extensions, and caps imports at 500 files. Project file
+# IDs are usable with /stream/api/chat + /api/chat exactly like upload IDs.
+# ---------------------------------------------------------------------------
+
+
+def _import_project_files(name: str, raw_files: List[dict]) -> dict:
+    """Store a project from an already-validated raw file list."""
+    if not raw_files:
+        raise HTTPException(status_code=422, detail="No files provided")
+    normalized: list[dict] = []
+    seen_paths: set[str] = set()
+    for f in raw_files:
+        if f.get("size") is None:
+            continue  # already rejected during validation
+        path = f.get("path")
+        if path in seen_paths:
+            continue  # duplicate path within the same import — first wins
+        seen_paths.add(path)
+        normalized.append({
+            "path": path,
+            "size": f["size"],
+            "content": f["content"],
+        })
+    if not normalized:
+        raise HTTPException(status_code=422, detail="No files provided")
+    if len(normalized) > database.MAX_PROJECT_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files: {len(normalized)} "
+                   f"(maximum {database.MAX_PROJECT_FILES})",
+        )
+    # Uniqueness guard for the project name (projects table has no unique index)
+    with database._lock:
+        taken = database.get_db().execute(
+            "SELECT 1 FROM projects WHERE name=?", (name,)).fetchone()
+    if taken:
+        raise HTTPException(status_code=409, detail=f"A project named '{name}' already exists")
+    try:
+        proj = database.project_create(name, normalized)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail=f"A project named '{name}' already exists")
+    # Flat project shape (id/name/file_count/total_bytes/files) — same contract
+    # as GET /api/projects/{id}; clients (frontend + tests) read `proj["id"]`
+    # directly, so don't nest under {"ok", "project"}.
+    return proj
+
+
+def _validate_json_files(payload: dict) -> list[dict]:
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Missing required field: name")
+    files = payload.get("files")
+    if not isinstance(files, list) or not files:
+        raise HTTPException(status_code=422, detail="Missing required field: files[]")
+    if len(files) > database.MAX_PROJECT_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files: {len(files)} "
+                   f"(maximum {database.MAX_PROJECT_FILES})",
+        )
+    out: list[dict] = []
+    for f in files:
+        if not isinstance(f, dict) or not isinstance(f.get("path"), str):
+            raise HTTPException(
+                status_code=422, detail=f"Each file needs a 'path': {f!r}")
+        path = f["path"].replace("\\", "/").strip()
+        if not path or path.startswith("/") or ".." in path.split("/"):
+            raise HTTPException(
+                status_code=422, detail=f"Bad file path (must be relative): {f['path']!r}")
+        base = path.rsplit("/", 1)[-1]
+        ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=415, detail=f"Unsupported file type: {base!r}")
+        content = f.get("content")
+        if not isinstance(content, str):
+            raise HTTPException(status_code=422, detail=f"File '{path}' needs string 'content'")
+        out.append({
+            "path": path,
+            "size": len(content.encode("utf-8")),
+            "content": content,
+        })
+    return [{"name": name, "files": out}]
+
+
+async def _zip_to_files(file: UploadFile) -> tuple[str, list[dict]]:
+    """Extract an upload zip into importable file entries (with all cap checks).
+
+    Read with the same chunked pattern as /api/upload — real uploads are
+    async-only files, so ``file.file.read()`` (sync) would raise RuntimeError.
+    """
+    if file.size is not None and file.size > MAX_PROJECT_BYTES_TOTAL:
+        raise HTTPException(status_code=413, detail="Zip too large")
+    chunks: List[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_PROJECT_BYTES_TOTAL:
+            raise HTTPException(status_code=413, detail="Zip too large")
+        chunks.append(chunk)
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(b"".join(chunks)), "r")
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=415, detail="Not a valid zip file")
+    name = (file.filename or "project").rsplit(".", 1)[0].strip() or "project"
+    files: list[dict] = []
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        parts = info.filename.replace("\\", "/").split("/")
+        if any(p in database.SKIP_DIRS for p in parts[:-1]):
+            continue
+        base = parts[-1]
+        if base in database.SKIP_FILES or base.startswith("."):
+            continue
+        ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
+        if ext not in ALLOWED_EXTENSIONS:
+            continue
+        if info.file_size > database.MAX_PROJECT_FILE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"'{info.filename}' exceeds {database.MAX_PROJECT_FILE_BYTES // (1024 * 1024)} MB per-file limit",
+            )
+        try:
+            text = zf.read(info).decode("utf-8", errors="replace")
+        except Exception:
+            continue  # symlink stubs in zips read as garbage — drop them
+        if "\x00" in text:
+            continue
+        raw_len = len(text.encode("utf-8"))
+        if raw_len > database.MAX_PROJECT_FILE_BYTES:
+            # Truncating can cut a line mid-way — if so, stop at the last
+            # complete line so no half-line is stored.
+            text = text[:database.MAX_PROJECT_FILE_BYTES]
+            line_end = text.rfind("\n", len(text) - 4096)
+            if line_end > 0:
+                text = text[:line_end]
+        files.append({"path": info.filename, "size": len(text.encode("utf-8")),
+                      "content": text})
+    if not files:
+        raise HTTPException(status_code=422, detail="No importable files in the zip")
+    if len(files) > database.MAX_PROJECT_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many files: {len(files)} "
+                   f"(maximum {database.MAX_PROJECT_FILES})",
+        )
+    return name, files
+
+
+@app.post("/api/projects")
+async def create_project(request: Request):
+    """Import a project (folder) — JSON body `{name, files:[{path, content}]}` or a zip.
+
+    Dispatch on content type (like /api/upload): a `File(...)`-typed param would
+    force FastAPI to parse EVERY body as multipart and the JSON path would 422.
+    """
+    ctype = request.headers.get("content-type", "").lower()
+    if "multipart/form-data" in ctype:
+        form = await request.form()
+        zip_item = form.get("zip")
+        # Starlette form values that aren't files are plain `str`; the zip
+        # arrives as a starlette UploadFile (NOT a fastapi one), so check the
+        # type idiomatically (is-not-str) rather than via isinstance(fastapi).
+        if zip_item is None or isinstance(zip_item, str):
+            raise HTTPException(
+                status_code=422,
+                detail="Zip upload must use the multipart file field 'zip'",
+            )
+        name, files = await _zip_to_files(UploadFile(file=zip_item.file,
+                                                     filename=zip_item.filename,
+                                                     headers=zip_item.headers))
+        return _import_project_files(name, files)
+    if "application/json" in ctype:
+        payload = await request.json()
+        parsed = _validate_json_files(payload)
+        return _import_project_files(parsed[0]["name"], parsed[0]["files"])
+    raise HTTPException(
+        status_code=422,
+        detail="Import a project: send JSON {name, files:[{path, content}]} or a zip upload",
+    )
+
+
+@app.get("/api/projects")
+async def list_projects():
+    """List imported projects (no file contents)."""
+    return {"projects": database.project_list()}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project_endpoint(project_id: str):
+    proj = database.project_get(project_id)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project_endpoint(project_id: str):
+    if not database.project_delete(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"ok": True}
+
+
+@app.get("/api/projects/{project_id}/files/{file_id}")
+async def get_project_file_endpoint(project_id: str, file_id: str):
+    f = database.project_file_get(file_id)
+    if f is None or f.get("project_id") != project_id:
+        raise HTTPException(status_code=404, detail="File not found in project")
+    return f
+
+
 @app.get("/")
 async def root():
     return {"message": "Jev Open Source Dashboard API", "status": "running"}
@@ -359,7 +587,11 @@ async def api_logs():
 
 
 def add_file_context(message: str, context_files: List[str]) -> str:
-    """Add uploaded file contents to the prompt for code-aware chat"""
+    """Add uploaded file contents to the prompt for code-aware chat.
+
+    Accepts both uploaded-file IDs and project file IDs (P3.1 folder imports);
+    project files are labelled with their in-repo path so the model can cite it.
+    """
     if not context_files:
         return message
     
@@ -370,12 +602,42 @@ def add_file_context(message: str, context_files: List[str]) -> str:
             content = data["content"]
             filename = data["filename"]
             file_contents.append(f"File: {filename}\n```\n{content}\n```")
+            continue
+        # Project file (from a folder import)
+        pf = database.project_file_get(file_id)
+        if pf is not None:
+            content = pf["content"]
+            label = pf["path"]
+            proj = database.project_get(pf["project_id"])
+            if proj is not None:
+                label = f"{proj['name']}/{pf['path']}"
+            file_contents.append(f"File: {label}\n```\n{content}\n```")
     
     if not file_contents:
         return message
     
     context_header = f"\n\nI have the following files for context:\n\n" + "\n\n".join(file_contents)
     return message + context_header
+
+
+def _system_prompt() -> str:
+    """System prompt from the SQLite settings store (per P3.4)."""
+    return (database.setting_get("system_prompt", database.DEFAULT_SYSTEM_PROMPT) or "").strip()
+
+
+def _temperature() -> float:
+    raw = database.setting_get("temperature", "0.7") or "0.7"
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 0.7
+    if not math.isfinite(v):  # nan/inf would otherwise slip past the clamp
+        return 0.7
+    return max(0.0, min(1.0, v))
+
+
+def _ollama_options() -> dict:
+    return {"temperature": _temperature(), "num_ctx": 8192}
 
 
 @app.post("/api/chat")
@@ -419,7 +681,9 @@ async def call_ollama(prompt: str, model_name: str) -> str:
             json={
                 "model": model_name,
                 "prompt": prompt,
+                "system": _system_prompt(),
                 "stream": False,  # Non-streaming for simple endpoint
+                "options": _ollama_options(),
             }
         )
 
@@ -453,7 +717,9 @@ async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, Non
                 json={
                     "model": model_name,
                     "prompt": prompt,
+                    "system": _system_prompt(),
                     "stream": True,  # Enable streaming
+                    "options": _ollama_options(),
                 }
             ) as response:
                 if response.status_code in (400, 404):

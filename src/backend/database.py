@@ -57,6 +57,51 @@ def get_db() -> sqlite3.Connection:
                    created_at INTEGER NOT NULL
                )"""
         )
+        # --- Phase 3: imported projects + RAG index + settings -----------
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS projects (
+                   id TEXT PRIMARY KEY,
+                   name TEXT NOT NULL,
+                   file_count INTEGER NOT NULL DEFAULT 0,
+                   total_bytes INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL
+               )"""
+        )
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS project_files (
+                   id TEXT PRIMARY KEY,
+                   project_id TEXT NOT NULL,
+                   path TEXT NOT NULL,
+                   size INTEGER NOT NULL DEFAULT 0,
+                   content TEXT NOT NULL,
+                   line_count INTEGER NOT NULL DEFAULT 0,
+                   created_at INTEGER NOT NULL,
+                   UNIQUE(project_id, path)
+               )"""
+        )
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS embeddings (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   project_id TEXT NOT NULL,
+                   file_ref TEXT NOT NULL,
+                   chunk_index INTEGER NOT NULL,
+                   content TEXT NOT NULL,
+                   start_line INTEGER NOT NULL DEFAULT 1,
+                   end_line INTEGER NOT NULL DEFAULT 1,
+                   embedding BLOB,
+                   model TEXT NOT NULL DEFAULT 'nomic-embed-text',
+                   created_at INTEGER NOT NULL
+               )"""
+        )
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_pfiles_proj ON project_files(project_id)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_embed_proj ON embeddings(project_id)")
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS settings (
+                   key TEXT PRIMARY KEY,
+                   value TEXT NOT NULL,
+                   updated_at INTEGER
+               )"""
+        )
         _conn.commit()
     return _conn
 
@@ -260,3 +305,180 @@ def purge_uploads(max_age_days: int = 7) -> list[tuple[str, str]]:
         conn.execute("DELETE FROM uploads WHERE created_at < ?", (cutoff,))
         conn.commit()
     return [(r["id"], r["filename"]) for r in rows]
+
+
+# --- Phase 3: projects (folder imports) ------------------------------------
+
+SKIP_DIRS = {
+    "node_modules", ".git", "venv", ".venv", "dist", "build", "__pycache__",
+    ".next", ".pytest_cache", ".idea", ".vscode", "coverage", "target",
+    "tmp", "cache", ".cache",
+}
+SKIP_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "CODE_OF_CONDUCT.md"}
+MAX_PROJECT_FILE_BYTES = 2 * 1024 * 1024  # per-file import cap (same as uploads)
+MAX_PROJECT_FILES = 500                  # hard cap per project (perf guard)
+
+
+def project_create(name: str, files: list[dict]) -> dict:
+    """Store a project + its allowed files. files: [{path, size, content}]"""
+    pid = uuid.uuid4().hex[:12]
+    ts = _now()
+    with _lock:
+        conn = get_db()
+        conn.execute(
+            "INSERT INTO projects (id, name, file_count, total_bytes, created_at) VALUES (?,?,?,?,?)",
+            (pid, name, len(files), sum(f["size"] for f in files), ts),
+        )
+        rows = [
+            (uuid.uuid4().hex[:12], pid, f["path"], f.get("size", len(f["content"])),
+             f["content"], len(f["content"].splitlines()), ts)
+            for f in files
+        ]
+        conn.executemany(
+            "INSERT INTO project_files (id, project_id, path, size, content, line_count, created_at) "
+            "VALUES (?,?,?,?,?,?,?)", rows)
+        conn.commit()
+    return project_get(pid) or {"id": pid, "name": name}
+
+
+def project_get(project_id: str) -> dict | None:
+    with _lock:
+        row = get_db().execute("SELECT * FROM projects WHERE id=?",
+                               (project_id,)).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "file_count": row["file_count"],
+        "total_bytes": row["total_bytes"],
+        "created_at": row["created_at"],
+        "files": project_files_list(project_id),
+    }
+
+
+def project_list() -> list[dict]:
+    with _lock:
+        rows = get_db().execute(
+            "SELECT * FROM projects ORDER BY created_at DESC").fetchall()
+    return [{
+        "id": r["id"],
+        "name": r["name"],
+        "file_count": r["file_count"],
+        "total_bytes": r["total_bytes"],
+        "created_at": r["created_at"],
+    } for r in rows]
+
+
+def project_delete(project_id: str) -> bool:
+    with _lock:
+        conn = get_db()
+        cur = conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        conn.execute("DELETE FROM project_files WHERE project_id=?", (project_id,))
+        conn.execute("DELETE FROM embeddings WHERE project_id=?", (project_id,))
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def project_files_list(project_id: str) -> list[dict]:
+    with _lock:
+        rows = get_db().execute(
+            "SELECT id, path, size, line_count FROM project_files WHERE project_id=? ORDER BY path",
+            (project_id,)).fetchall()
+    return [{
+        "id": r["id"],
+        "path": r["path"],
+        "size": r["size"],
+        "line_count": r["line_count"],
+    } for r in rows]
+
+
+def project_file_get(file_id: str) -> dict | None:
+    with _lock:
+        row = get_db().execute(
+            "SELECT id, project_id, path, size, content, line_count FROM project_files WHERE id=?",
+            (file_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def project_file_get_by_path(project_id: str, path: str) -> dict | None:
+    with _lock:
+        row = get_db().execute(
+            "SELECT id, project_id, path, size, content, line_count "
+            "FROM project_files WHERE project_id=? AND path=?",
+            (project_id, path)).fetchone()
+    return dict(row) if row else None
+
+
+# --- Phase 3: settings (key/value) ------------------------------------------
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are CodeForge AI, a precise senior-level coding assistant. "
+    "Always give concrete, run-ready code. When referencing a file, include "
+    "its path and line numbers. Be brief; no filler."
+)
+
+
+def setting_get(key: str, default: str | None = None) -> str | None:
+    with _lock:
+        row = get_db().execute("SELECT value FROM settings WHERE key=?",
+                               (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def setting_set(key: str, value: str) -> None:
+    with _lock:
+        get_db().execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?,?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (key, value, _now()))
+        get_db().commit()
+
+
+def settings_all() -> dict:
+    """Return all settings, with defaults applied for known keys."""
+    known = {"system_prompt": DEFAULT_SYSTEM_PROMPT, "temperature": "0.7"}
+    with _lock:
+        rows = get_db().execute("SELECT key, value FROM settings").fetchall()
+    out = dict(known)
+    for r in rows:
+        out[r["key"]] = r["value"]
+    return out
+
+
+# --- Phase 3: embeddings (RAG) ----------------------------------------------
+
+def chunks_add(project_id: str, file_ref: str, rows: list[tuple]) -> int:
+    """rows: [(chunk_index, content, start_line, end_line, blob)]
+
+    Replaces the previous chunk set for (project_id, file_ref) — call again
+    after file edits to refresh its slice of the index.
+    """
+    ts = _now()
+    with _lock:
+        conn = get_db()
+        conn.execute("DELETE FROM embeddings WHERE project_id=? AND file_ref=?",
+                     (project_id, file_ref))
+        conn.executemany(
+            "INSERT INTO embeddings (project_id, file_ref, chunk_index, content, "
+            "start_line, end_line, embedding, model, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            [(project_id, file_ref, ci, content, sl, el, blob,
+              "nomic-embed-text", ts) for ci, content, sl, el, blob in rows])
+        conn.commit()
+    return len(rows)
+
+
+def chunks_for_project(project_id: str) -> list[dict]:
+    with _lock:
+        rows = get_db().execute(
+            "SELECT id, file_ref, chunk_index, content, start_line, end_line "
+            "FROM embeddings WHERE project_id=? ORDER BY file_ref, chunk_index",
+            (project_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def embeddings_clear(project_id: str) -> None:
+    with _lock:
+        get_db().execute("DELETE FROM embeddings WHERE project_id=?",
+                         (project_id,))
+        get_db().commit()

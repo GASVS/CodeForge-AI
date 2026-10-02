@@ -35,6 +35,16 @@ def client():
 
 
 @pytest.fixture
+def fresh_projects():
+    conn = database.get_db()
+    conn.execute("DELETE FROM project_files")
+    conn.execute("DELETE FROM projects")
+    conn.execute("DELETE FROM embeddings")
+    conn.execute("DELETE FROM settings")
+    conn.commit()
+
+
+@pytest.fixture
 def fresh_chats():
     database.get_db().execute("DELETE FROM conversations")
     database.get_db().commit()

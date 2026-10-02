@@ -14,6 +14,10 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# === Session recovery notes (personal, gitignored by user request) ===
+CRASH_RECOVERY.md
+ROADMAP.md
+
 # === Node / frontend ===
 node_modules/
 dist/
