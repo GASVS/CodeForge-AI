@@ -39,7 +39,7 @@
 | 25 | P2.4: backend pytest suite (10 tests) + Vitest port (4 tests) + CI workflow | ✅ DONE | 8179ee0 (10 passed local; 4/4 vitest; tsc/build green; build.sh e2e exit 0; **CI green on push** — needs a user remote) |
 | 26 | Fixed bug surfaced by P2.4: `get_conversation` returned summary dict → `GET /api/chats/{id}` missing messages | ✅ DONE | 8179ee0 (chat-load + export now return full messages) |
 | 27 | Restore regression: App.tsx on disk had reverted to pre-P1.3 stub → **Logs tab, Stop button, thinking indicator, chat sidebar all gone** | ✅ CODE+LIVE (2026-10-02) | Rebased: full 93e48d3 version restored into `frontend/src/App.tsx` + yesterday's light-mode contrast fix (model select, send button). tsc/build green; live: `/api/logs` 200 via vite; LogsPanel wired in served bundle |
-| 28 | Logs panel: full-height right column covered half the conversation bar → make it a Settings-style drawer (only visible when pressed) | ✅ DONE (2026-10-02) | LogsPanel now rendered inside a theme-aware bottom drawer (max-h-70vh) behind a Settings-style overlay; no longer a permanent 520px full-height column. tsc/build/tests green |
+| 28 | Logs panel: full-height right column covered half the conversation bar → make it a Settings-style drawer (only visible when pressed) | ✅ DONE (2026-10-02) | LogsPanel now rendered inside a theme-aware bottom drawer (max-h-70vh) behind a Settings-style overlay; no longer a permanent 520px full-height column. tsc/build/tests green (5c3034a) |
 
 ---
 
