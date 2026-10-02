@@ -82,6 +82,12 @@
 - [✅] **D4** Verified: `npx tsc --noEmit` clean; `npm run build` green (328 kB); `npm test` 4/4 pass. Live check pending only if user wants it — code paths identical to previously-verified /api/logs + LogsPanel.
 - [📌] NEXT: back to plan — P3.1 folder import (backend Phase-3 tables/helpers already uncommitted) → P3.2 RAG → P3.3 chips → P3.4 settings UI.
 
+### Session 2026-10-02 — CHAT-HISTORY SIDEBAR → POPUP (follow-up: "left side is blocked by part of tab — make it a drop-down menu / pop-up instead of blocking part of the screen")
+- [✅] **C1** Diagnosis: the chat-history `<aside>` in `App.tsx` was an **inline flex column** (`width: showSidebar ? 320 : 0, minWidth: showSidebar ? 280 : 0`) — a permanent left rail that reserved ~280–320 px and pushed the header+main over, leaving a visible empty void on the left (screenshot) since it had no chats.
+- [✅] **C2** `App.tsx`: converted chat history to the same **Settings-style popup** already used for Settings — only rendered when open: dimmed `fixed inset-0 bg-black/50 z-40` backdrop (click to close) + theme-aware `fixed left-0 top-0 h-full w-[320px]` overlay panel (`z-50`, dark `bg-slate-900 border-slate-800` / light `bg-white border-gray-200`). Export Markdown/JSON buttons moved into the panel footer. Zero inline footprint when closed → left side no longer blocked.
+- [✅] **C3** `handleSelectChat` now calls `setShowSidebar(false)` first → picking a chat auto-closes the popup and reveals the conversation.
+- [✅] **C4** Verified: `npx tsc --noEmit` clean; `npm run build` green (328 kB, 0.8 s); `npm test` 4/4 pass. Live smoke (vite preview :4173 → killed): served bundle has export buttons + 3× backdrop + chat-list `li` render, and the old `min-width 150ms` inline-width style is gone.
+
 ### Session 2026-10-02 — LOGS TAB RESTORED (regression from pre-P2.3 stub was on disk uncommitted)
 - [✅] **R1** Diagnosis: disk `App.tsx` (487-line restore from b90c6ae, done yesterday uncommitted) predated P1.3/P2.3 → Logs tab, Stop button, thinking dots, chat sidebar missing in the running app on :3000. `frontend/src/components/` (yesterday's new SettingsPanel) untracked → fresh clone couldn't build.
 - [✅] **R2** Fix: `frontend/src/App.tsx` = full 767-line version from 93e48d3 (logs + stop + thinking + sidebar + persistence) re-applied with yesterday's two light-mode contrast fixes (model select light/dark ternary; send button `disabled:opacity-50` + `text-white`). `npx tsc --noEmit` clean; `npm run build` green (327 kB).

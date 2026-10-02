@@ -154,6 +154,8 @@ function App() {
   };
 
   const handleSelectChat = async (id: string) => {
+    // Picking a chat closes the popup so the conversation is fully visible
+    setShowSidebar(false);
     if (id === currentChatId) return;
     try {
       const res = await fetch(`${API_URL}/api/chats/${id}`);
@@ -439,37 +441,44 @@ function App() {
 
   return (
     <div className={`min-h-screen ${containerBg} ${textColor} flex`}>
-      {/* Chat History Sidebar */}
-      <aside
-        className={`shrink-0 border-r ${borderColor} ${headerBg} overflow-y-auto`}
-        style={{ width: showSidebar ? 320 : 0, minWidth: showSidebar ? 280 : 0, transition: 'width 150ms ease, min-width 150ms ease' }}
-      >
-        <div className="flex flex-col h-screen sticky top-0">
-          <ChatSidebar
-            apiUrl={API_URL}
-            selectedId={currentChatId}
-            onSelect={handleSelectChat}
-            onCreate={handleCreateChat}
-            onDelete={handleDeleteChat}
+      {/* Chat History — popup (like Settings): overlay, zero inline footprint when closed */}
+      {showSidebar && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setShowSidebar(false)}
           />
-          <div className="p-3 border-t" style={{ borderColor: theme === 'dark' ? '#1e293b' : '#e5e7eb' }}>
-            <button
-              onClick={() => handleExportChat('md')}
-              disabled={!currentChatId}
-              className="w-full p-2 text-sm rounded-lg disabled:opacity-40 hover:bg-slate-800 transition-colors"
-            >
-              ⬇ Export as Markdown
-            </button>
-            <button
-              onClick={() => handleExportChat('json')}
-              disabled={!currentChatId}
-              className="w-full p-2 text-sm rounded-lg disabled:opacity-40 mt-1 hover:bg-slate-800 transition-colors"
-            >
-              ⬇ Export as JSON
-            </button>
-          </div>
-        </div>
-      </aside>
+          <aside
+            className={`fixed left-0 top-0 h-full z-50 shadow-xl overflow-y-auto flex flex-col ${
+              theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
+            } border-r`}
+          >
+            <ChatSidebar
+              apiUrl={API_URL}
+              selectedId={currentChatId}
+              onSelect={handleSelectChat}
+              onCreate={handleCreateChat}
+              onDelete={handleDeleteChat}
+            />
+            <div className="p-3 border-t mt-auto" style={{ borderColor: theme === 'dark' ? '#1e293b' : '#e5e7eb' }}>
+              <button
+                onClick={() => handleExportChat('md')}
+                disabled={!currentChatId}
+                className="w-full p-2 text-sm rounded-lg disabled:opacity-40 hover:bg-slate-800 transition-colors"
+              >
+                ⬇ Export as Markdown
+              </button>
+              <button
+                onClick={() => handleExportChat('json')}
+                disabled={!currentChatId}
+                className="w-full p-2 text-sm rounded-lg disabled:opacity-40 mt-1 hover:bg-slate-800 transition-colors"
+              >
+                ⬇ Export as JSON
+              </button>
+            </div>
+          </aside>
+        </>
+      )}
       {/* Logs drawer (toggle from header) — like Settings: overlay, only rendered when open */}
       {showLogs && (
         <>
