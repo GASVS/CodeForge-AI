@@ -507,6 +507,8 @@ function App() {
         </>
       )}
 
+      {/* Main content column (header + chat) — sits to the right of the sidebar */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-screen">
       {/* Header */}
       <header className={`border-b ${borderColor} p-4 sticky top-0 ${headerBg} backdrop-blur z-10`}>
         <div className="max-w-6xl mx-auto flex items-center justify-between">
@@ -584,9 +586,9 @@ function App() {
       </header>
 
       {/* Chat Area */}
-      <main className="max-w-6xl mx-auto p-4 pb-32">
+      <main className="w-full max-w-[1100px] mx-auto px-4 pb-32">
         {messages.length === 1 && messages[0].id === 'welcome' ? (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-400">
+          <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-400 w-full">
             <div className="mb-6">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-indigo-500">
                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
@@ -611,7 +613,7 @@ function App() {
             </div>
           </div>
         ) : (
-          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2 mb-4">
+          <div className="flex flex-col gap-4 max-h-[60vh] overflow-y-auto pr-2 mb-4 w-full">
             {messages.map((msg, i) => {
               const isAssistant = msg.role === 'assistant';
               return (
@@ -682,6 +684,7 @@ function App() {
         )}
         <div ref={messagesEndRef} />
       </main>
+      </div>
 
       {/* File Context panel (toggled) */}
       {showFilePanel && (
@@ -706,13 +709,13 @@ function App() {
 
       {/* Input Area */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderColor} ${headerBg} p-4`}>
-        <div className="max-w-6xl mx-auto flex gap-3">
+        <div className="max-w-6xl mx-auto flex items-center gap-2">
           {/* File Upload Button — opens the context panel */}
           <button
             onClick={() => {
               setShowFilePanel((v) => !v);
             }}
-            className={`p-3 rounded-xl transition-colors ${theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
+            className={`shrink-0 p-3 rounded-xl transition-colors ${theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
             title="Attach code files"
           >
             {uploadedFiles.length > 0 ? (
@@ -726,9 +729,9 @@ function App() {
             )}
           </button>
 
-          {/* thinking indicator: only while waiting for the first token */}
+          {/* Thinking indicator: only while waiting for the first token */}
           {isLoading && !streamStarted && (
-            <div className="flex items-center gap-2 opacity-70">
+            <div className="flex items-center gap-2 opacity-70 px-1">
               <span className="inline-flex gap-1">
                 {[0, 1, 2].map((i) => (
                   <span
@@ -738,38 +741,43 @@ function App() {
                   />
                 ))}
               </span>
-              <span className="text-xs">Thinking…</span>
+              <span className="text-xs whitespace-nowrap">Thinking…</span>
             </div>
           )}
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && !isLoading && sendMessage(input)}
-            placeholder="Type your message..."
-            disabled={isLoading}
-            className={`flex-1 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'} border rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors`}
-          />
 
-          {isLoading ? (
-            <button
-              onClick={handleStop}
-              className="p-3 bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors flex items-center justify-center min-w-[48px]"
-              title="Stop generation"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim()}
-              className="p-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center justify-center min-w-[48px] text-white"
-            >
-              <SendIcon />
-            </button>
-          )}
+          {/* Input + send grouped: the field always takes the full remaining
+              width; send sits flush at the right edge — no left dead-zone. */}
+          <div className="flex-1 flex items-center gap-2 min-w-0">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && !isLoading && sendMessage(input)}
+              placeholder="Type your message..."
+              disabled={isLoading}
+              className={`flex-1 min-w-0 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'} border rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors`}
+            />
+
+            {isLoading ? (
+              <button
+                onClick={handleStop}
+                className={`shrink-0 p-3 bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors flex items-center justify-center min-w-[48px] ${!streamStarted ? '' : ''}`}
+                title="Stop generation"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={() => sendMessage(input)}
+                disabled={!input.trim()}
+                className="shrink-0 p-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center justify-center min-w-[48px] text-white"
+              >
+                <SendIcon />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
