@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] — v0.3.0 (Week 3)
 
+### Planned (Phase 6, see `docs/ACTION_PLAN.md`)
+- **Multi-model chat with shared history & shared skills** — one conversation, one shared thread + skill set across multiple Ollama models; per-reply model tagging; skills apply identically on any model
+- **Code indexer (MCP-style)** — structural code search (definitions, signatures, callers, outlines) with exact `file:line`, exposed as REST + an MCP tool server to replace `grep`/`python` for code browsing
+
 ### Added
 - **Persistent conversation history** — chats stored in a local SQLite database; nothing leaves your machine
 - Chat management API: `GET/POST /api/chats`, `GET/PUT/DELETE /api/chats/{id}`

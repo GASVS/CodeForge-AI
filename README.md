@@ -90,6 +90,14 @@ Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) t
 
 ---
 
+## Planned features (next)
+The two features currently being designed (see `docs/ACTION_PLAN.md` — **Phase 6**):
+
+- **Multi-model chat with shared history & shared skills.** Run several Ollama models inside **one conversation** and share one thread + one skill set across them — pick a fast model for quick answers and a reasoning model for deeper ones, tag each reply with the model that produced it, and apply a skill (e.g. `skills/frontend/react-theme-manage`) that behaves identically on any model in the thread.
+- **Code indexer (MCP-style) to replace `grep` + `python`.** A structural code index — find definitions, signatures, callers, get file outlines — with exact `file:line` results, exposed both as REST for the dashboard and as an **MCP tool server** (`list_files`, `search_symbols`, `get_definition`, `find_references`, `read_file`, `get_file_outline`) so external agents can browse the codebase through the same index.
+
+These build on top of the code-aware core (RAG / semantic search in Phase 3) and are scheduled after those tasks land.
+
 ## Competitive Analysis
 ### Jev (Target Market Leader)
 | Aspect | Jev | Our Angle |
