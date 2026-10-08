@@ -190,6 +190,27 @@
 
 ---
 
+## Phase 6 — New features requested 2026-10-08 (build AFTER P3.1+P3.2 green)
+
+> Owner request. Two first-class capabilities, detailed in `ROADMAP.md §★ NEW FEATURES`. Both build on the Phase-3 core already in flight.
+
+### 6.1 Multi-model chat with shared history & shared skills
+- [ ] **Goal:** one conversation, ONE shared thread + ONE shared skill set across multiple models; a skill applied with one model behaves identically when asked of another.
+- [ ] Shared skills store: new SQLite `skills(name, title, description, body, version, updated_at)` + CRUD (`database.py`, mirror settings helpers). Seed from existing `skills/` (`SKILL.md` frontmatter). Inject active skill body into system prompt **identically for every model** (extend `add_file_context` → `add_skills_context`).
+- [ ] Per-message model: add `model` per entry in `messages_json` (`/stream/api/chat` already takes `model_name` — persist the chosen model on the produced assistant message); `conversations.model` = "last used".
+- [ ] Frontend: chat model + per-reply "use this model…" override (`App.tsx` input bar); each answer tagged `[model]`; skills chips apply to the next message regardless of model.
+- [ ] **Verify:** one chat, 3 replies alternating two models → single ordered thread each model-tagged; apply `react-theme-manage` skill → identical compliance on `qwen3.5-9b-64k` AND `qwen3.8-27b-96k`; refresh → thread + tags survive (SQLite). **Done when:** all three verified. Commit: `feat: P6.1 multi-model shared history + shared skills`.
+
+### 6.2 Code indexer (MCP-style) — replace grep + python for code browsing
+- [ ] **Goal:** structural code index (definitions, signatures, callers, outline) with exact `file:line`, exposed as REST (dashboard) **and** an MCP tool server (external agents browse the codebase through it). Deterministic sibling to P3.2 RAG.
+- [ ] Parse at import: on `POST /api/projects`, per-language extractor (tree-sitter Py/JS/TS, light-tokenizer fallback) → symbols (fn/method/class/interface/enum), signatures, imports/exports, line ranges, nesting; store in `code_symbols(project_id, file_ref, name, kind, sig, start_line, end_line, parent)` + `code_refs(from, to, kind)`.
+- [ ] REST: `GET /api/projects/{id}/symbols?q=&kind=`, `GET /api/projects/{id}/symbols/{name}/references`, `GET /api/projects/{id}/files/{path}/outline`.
+- [ ] MCP server (stdio and/or SSE) wrapping the same queries: `list_files`, `search_symbols`, `get_definition`, `find_references`, `read_file`, `get_file_outline`.
+- [ ] Frontend: file tree + per-file symbol outline (name + line, clickable → exact `file:line`), global symbol search, breadcrumb.
+- [ ] **Verify:** import THIS repo → `GET .../symbols?q=project_files_list` → `src/backend/database.py:383` + line range + callers; an MCP client `list_tools`+`get_definition` (stdio/SSE) returns the same `file:line`; UI outline → click → right `file:line`. None requires grep/python. **Done when:** verified. Commit: `feat: P6.2 code indexer + MCP code-browsing server`.
+
+---
+
 ## Backlog (v1.1+, NOT in the v1 path)
 - OpenRouter + OpenAI/Anthropic BYOK (real impl of 2.2-Option-B)
 - GitHub OAuth for settings sync (plan Phase 1.3)
