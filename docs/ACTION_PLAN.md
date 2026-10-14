@@ -134,9 +134,9 @@
 ## Phase 3 — Code-aware core (the real differentiator)
 
 ### 3.1 Folder import (whole-project context, not single files)
-- [ ] Backend: `POST /api/projects` (multipart directory or zip) → walk with size/symlink guards (skip node_modules, .git, venv, >2 MB files, non-allowlisted extensions) → store tree in SQLite `projects` + `project_files` tables, return tree JSON.
-- [ ] Frontend: file-tree panel (expand/collapse), per-file "add to context" checkbox + "Add all (respecting caps)".
-- [ ] Verify: import a real repo (this repo) → tree renders; asking a question with 5 selected files produces an answer that cites file paths.
+- [x] Backend: `POST /api/projects` (multipart directory or zip) → walk with size/symlink guards (skip node_modules, .git, venv, >2 MB files, non-allowlisted extensions) → store tree in SQLite `projects` + `project_files` tables, return tree JSON. ✅ 3611251
+- [x] Frontend: file-tree panel (expand/collapse), per-file "add to context" checkbox + "Add all (respecting caps)". ✅ 2026-10-14 (`ProjectPanel.tsx` + 📎 files⇄projects cycling; ≤5-file cap enforced client-side)
+- [x] Verify: import a real repo (this repo) → tree renders; asking a question with 5 selected files produces an answer that cites file paths. ✅ 2026-10-14 live: JSON project import → `add(2,3)` Q answered "5" from imported file; real `database.py` import → model cited its `project_files` schema. Commit: `feat: P3.1 project import panel (file tree + context)`
 
 ### 3.2 Semantic search (RAG)
 - [ ] Backend: chunk project files (~200 tokens, 20 overlap), embed via Ollama (`/api/embeddings` with a local embedding model — test which one is installed or `ollama pull nomic-embed-text`), store in SQLite `embeddings` table; `GET /api/projects/{id}/search?q=&k=10` cosine-top-k (numpy is fine; no ChromaDB needed for this scale — drop the ChromaDB dep from the plan).

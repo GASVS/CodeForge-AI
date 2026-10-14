@@ -5,6 +5,7 @@ import SettingsPanel from '../components/SettingsPanel';
 import ChatSidebar from '../components/ChatSidebar';
 import LogsPanel from '../components/LogsPanel';
 import FileContext from './FileContext';
+import ProjectPanel from './ProjectPanel';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -90,7 +91,12 @@ function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  const [showFilePanel, setShowFilePanel] = useState(false);
+  // Which bottom panel the 📎 button opens: null (closed) | 'files' | 'projects'.
+  // The button cycles: files → projects → closed → files…
+  const [contextTab, setContextTab] = useState<null | 'files' | 'projects'>(null);
+  // Live set of the current project's file IDs (kept from the last panel load so
+  // we can drop stale selections when a project is replaced/deleted).
+  const lastProjectFileIds = useRef<Set<string>>(new Set());
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<any[]>([]);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -426,6 +432,20 @@ function App() {
     setMessages([newChatState()]);
   };
 
+  // ProjectPanel loads/switches/deletes projects: track its file IDs and drop
+  // selections that point at files the current project no longer has.
+  const handleProjectFiles = (ids: readonly string[]) => {
+    const next = new Set<string>(ids);
+    const prev = lastProjectFileIds.current;
+    const gone = new Set([...prev].filter(id => !next.has(id)));
+    setSelectedFiles(s => {
+      const out = new Set(s);
+      gone.forEach(id => out.delete(id));
+      return out;
+    });
+    lastProjectFileIds.current = next;
+  };
+
   const suggestions = [
     'Explain how async/await works in JavaScript',
     'Write a Python function to parse JSON files',
@@ -695,19 +715,28 @@ function App() {
       </main>
       </div>
 
-      {/* File Context panel (toggled) */}
-      {showFilePanel && (
+      {/* Context panels (toggled + cycled from the 📎 button): uploaded files / imported projects */}
+      {contextTab !== null && (
         <div className={`fixed left-0 right-0 bottom-[84px] z-30 ${theme === 'dark' ? 'bg-slate-950/95' : 'bg-gray-50/95'} backdrop-blur border-t ${borderColor}`}>
           <div className="max-w-6xl mx-auto p-4">
-            <FileContext
-              uploadedFiles={uploadedFiles}
-              setUploadedFiles={setUploadedFiles}
-              selectedFiles={selectedFiles}
-              setSelectedFiles={setSelectedFiles}
-              theme={theme}
-            />
+            {contextTab === 'files' ? (
+              <FileContext
+                uploadedFiles={uploadedFiles}
+                setUploadedFiles={setUploadedFiles}
+                selectedFiles={selectedFiles}
+                setSelectedFiles={setSelectedFiles}
+                theme={theme}
+              />
+            ) : (
+              <ProjectPanel
+                selectedFiles={selectedFiles}
+                setSelectedFiles={setSelectedFiles}
+                theme={theme}
+                onFilesChange={handleProjectFiles}
+              />
+            )}
             <button
-              onClick={() => setShowFilePanel(false)}
+              onClick={() => setContextTab(null)}
               className="mt-3 w-full p-2 text-sm rounded-lg opacity-70 hover:opacity-100 transition-opacity"
             >
               Close
@@ -719,13 +748,20 @@ function App() {
       {/* Input Area */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderColor} ${headerBg} p-4`}>
         <div className="max-w-6xl mx-auto flex items-center gap-2">
-          {/* File Upload Button — opens the context panel */}
+          {/* Context button — cycles: attach files → import project → close */}
           <button
-            onClick={() => {
-              setShowFilePanel((v) => !v);
-            }}
-            className={`shrink-0 p-3 rounded-xl transition-colors ${theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
-            title="Attach code files"
+            onClick={() =>
+              setContextTab(t => t === null ? 'files' : t === 'files' ? 'projects' : null)
+            }
+            className={`shrink-0 p-3 rounded-xl transition-colors ${
+              contextTab === null ? (theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100')
+                : (theme === 'dark' ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white')
+            }`}
+            title={
+              contextTab === null ? 'Attach code files or import a project'
+              : contextTab === 'files' ? 'Switch to imported projects'
+              : 'Close the context panel'
+            }
           >
             {uploadedFiles.length > 0 ? (
               <span className="flex items-center gap-1.5 text-sm font-medium">
