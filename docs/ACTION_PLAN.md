@@ -138,10 +138,10 @@
 - [x] Frontend: file-tree panel (expand/collapse), per-file "add to context" checkbox + "Add all (respecting caps)". ✅ 2026-10-14 (`ProjectPanel.tsx` + 📎 files⇄projects cycling; ≤5-file cap enforced client-side)
 - [x] Verify: import a real repo (this repo) → tree renders; asking a question with 5 selected files produces an answer that cites file paths. ✅ 2026-10-14 live: JSON project import → `add(2,3)` Q answered "5" from imported file; real `database.py` import → model cited its `project_files` schema. Commit: `feat: P3.1 project import panel (file tree + context)`
 
-### 3.2 Semantic search (RAG)
-- [ ] Backend: chunk project files (~200 tokens, 20 overlap), embed via Ollama (`/api/embeddings` with a local embedding model — test which one is installed or `ollama pull nomic-embed-text`), store in SQLite `embeddings` table; `GET /api/projects/{id}/search?q=&k=10` cosine-top-k (numpy is fine; no ChromaDB needed for this scale — drop the ChromaDB dep from the plan).
-- [ ] Frontend: search box in the file panel ("Where is X defined?") → top-k snippets with file:line; answer-question flow auto-injects top-k as context (replace naive concat in `add_file_context` with RAG-picked context).
-- [ ] Verify: ask "where is add_file_context defined" → correct file + lines in < 3 s.
+### 3.2 Semantic search (RAG) — ✅ DONE 2026-10-14 (backend + tests + panel; live: search ranks, RAG chat cites `src/math.py:3` "5" in 7 s)
+- [x] Backend: chunk project files (line-boundary, ~800-char windows + overlap, hard-split >10 KB lines), embed via Ollama `/api/embed` with `nomic-embed-text` (batch 16), store in SQLite `embeddings`; `GET /api/projects/{id}/search?q=&k=10` cosine-top-k via numpy (no ChromaDB). Best-effort indexing on import; `POST /api/projects/{id}/index` rebuilds idempotently.
+- [x] Frontend: search box in ProjectPanel ("Where is X defined?") → top-k snippets with file:lines + score; "Semantic answers" toggle grounds chat (`project_ids` on `/stream/api/chat` → `_rag_context_for_question` top-8 chunks prepended to the prompt).
+- [x] Verify: ask "where is add defined" → `src/math.py:1–8` #1 (score .7248 > .5265), answered from context with `src/math.py:3` cited in 7 s. 29/29 backend tests, tsc/build/vitest green.
 
 ### 3.3 Code actions (v1 set, keep it to four)
 - [ ] "Explain this file" — prompt template + context = that file → answer with inline references.

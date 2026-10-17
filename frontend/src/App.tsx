@@ -97,6 +97,11 @@ function App() {
   // Live set of the current project's file IDs (kept from the last panel load so
   // we can drop stale selections when a project is replaced/deleted).
   const lastProjectFileIds = useRef<Set<string>>(new Set());
+  // P3.2 RAG mode: when set, chat sends `project_ids=<id>` instead of the
+  // selected-file concat — the backend picks the top relevant chunks for the
+  // question. Toggled from ProjectPanel; cleared when the active project is
+  // replaced/deleted so a stale id never reaches the stream endpoint.
+  const [ragProjectId, setRagProjectId] = useState<string | null>(null);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chats, setChats] = useState<any[]>([]);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -356,8 +361,17 @@ function App() {
     try {
       // Use SSE streaming for real-time updates
       const fileIds = Array.from(selectedFiles).join(',');
+      const params = new URLSearchParams({
+        message: content,
+        model_name: model,
+        file_ids: fileIds,
+      });
+      // P3.2: RAG mode active → backend picks the top relevant chunks of the
+      // imported project for this question (file_ids still ride along as an
+      // explicit selection, but the RAG prefix does the grounding).
+      if (ragProjectId) params.set('project_ids', ragProjectId);
       const eventSource = new EventSource(
-        `${API_URL}/stream/api/chat?message=${encodeURIComponent(content)}&model_name=${encodeURIComponent(model)}&file_ids=${encodeURIComponent(fileIds)}`
+        `${API_URL}/stream/api/chat?${params.toString()}`
       );
 
       eventSource.onmessage = (event) => {
@@ -733,6 +747,8 @@ function App() {
                 setSelectedFiles={setSelectedFiles}
                 theme={theme}
                 onFilesChange={handleProjectFiles}
+                ragProjectId={ragProjectId}
+                setRagProjectId={setRagProjectId}
               />
             )}
             <button

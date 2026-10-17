@@ -197,6 +197,7 @@ class ChatRequest(BaseModel):
     model_name: Optional[str] = "qwen3.5-9b-64k"  # Updated default
     stream: bool = True
     context_files: Optional[List[str]] = None  # List of uploaded file IDs
+    project_ids: Optional[List[str]] = None    # Imported projects → RAG context
 
 
 # In-memory storage for uploaded files (in production, use database)
@@ -331,8 +332,10 @@ async def delete_file(file_id: str):
 # ---------------------------------------------------------------------------
 
 
-def _import_project_files(name: str, raw_files: List[dict]) -> dict:
-    """Store a project from an already-validated raw file list."""
+async def _import_project_files(name: str, raw_files: List[dict]) -> dict:
+    """Store a project from an already-validated raw file list, then build its
+    RAG index (P3.2) as best effort — the import itself must never fail because
+    the embedding model is down."""
     if not raw_files:
         raise HTTPException(status_code=422, detail="No files provided")
     normalized: list[dict] = []
@@ -367,9 +370,15 @@ def _import_project_files(name: str, raw_files: List[dict]) -> dict:
         proj = database.project_create(name, normalized)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"A project named '{name}' already exists")
-    # Flat project shape (id/name/file_count/total_bytes/files) — same contract
-    # as GET /api/projects/{id}; clients (frontend + tests) read `proj["id"]`
-    # directly, so don't nest under {"ok", "project"}.
+    # P3.2: embed the project's files now so the semantic-search endpoints work
+    # immediately after import. Failure (embedding model down, Ollama 5xx) just
+    # logs — `POST /{id}/index` can rebuild the index later.
+    try:
+        stats = await project_index(proj["id"])
+        logger.info("Project %s indexed: %s chunks across %s files",
+                    proj["id"], stats.get("chunks", 0), stats.get("files_indexed", 0))
+    except HTTPException as e:
+        logger.warning("Project %s imported but not indexed: %s", proj.get("name"), e.detail)
     return proj
 
 
@@ -500,11 +509,11 @@ async def create_project(request: Request):
         name, files = await _zip_to_files(UploadFile(file=zip_item.file,
                                                      filename=zip_item.filename,
                                                      headers=zip_item.headers))
-        return _import_project_files(name, files)
+        return await _import_project_files(name, files)
     if "application/json" in ctype:
         payload = await request.json()
         parsed = _validate_json_files(payload)
-        return _import_project_files(parsed[0]["name"], parsed[0]["files"])
+        return await _import_project_files(parsed[0]["name"], parsed[0]["files"])
     raise HTTPException(
         status_code=422,
         detail="Import a project: send JSON {name, files:[{path, content}]} or a zip upload",
@@ -620,6 +629,213 @@ def add_file_context(message: str, context_files: List[str]) -> str:
     return message + context_header
 
 
+# ---------------------------------------------------------------------------
+# P3.2 — Semantic search (RAG)
+#
+# On import, each project file is split into overlapping chunks that are
+# embedded with Ollama's local embedding model and stored in the `embeddings`
+# table. `project_search` cosine-ranks the chunks against a query, and
+# `_rag_context` turns the top-k picks into a labelled block prepended to the
+# model prompt for chat. numpy does the vector math — no ChromaDB needed.
+# ---------------------------------------------------------------------------
+EMBED_MODEL = "nomic-embed-text"
+EMBED_BATCH = 16          # chunks per Ollama /api/embed call (bounds memory)
+CHUNK_TOKENS = 200        # ~200-token target per chunk (≈1/4 token per char)
+CHUNK_OVERLAP = 20        # tokens of overlap between consecutive chunks
+EMBED_CHARS = 2048        # ~1024 tokens — a safe single-chunk ceiling
+EMBED_CHARS_HARD = 10000  # split anything bigger so no single call is huge
+MAX_SEARCH_CHARS = 4000   # per-chunk ceiling in the injected context block
+RAG_CONTEXT_CHUNKS = 8    # how many picks to feed into the model prompt
+
+
+def _split_chunks(text: str) -> list[tuple[int, str]]:
+    """Split text into (start_line, chunk_text) pairs.
+
+    ~CHUNK_TOKENS (~800 chars) per chunk with a line-boundary overlap so no
+    content is dropped at the seam. Small files come back as one chunk.
+    start_line is the file 1-based line where the chunk begins.
+    """
+    lines = text.split("\n")
+    target = min(EMBED_CHARS, max(CHUNK_TOKENS * 4, 64))
+    overlap = max(6, min(CHUNK_OVERLAP * 4, target // 3))
+
+    out: list[tuple[int, str]] = []
+    window: list[str] = []      # lines in the current chunk (not yet flushed)
+    window_start = 1            # file line no of window[0]
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        # Would adding this line overflow the target? Flush first if nonempty.
+        cur_len = sum(len(l) + 1 for l in window)
+        if window and cur_len + len(line) > target:
+            out.append((window_start, "\n".join(window)))
+            # Keep the tail as overlap for the next window (line-granularity).
+            overlap_lines: list[str] = []
+            overlap_len = 0
+            for prev in reversed(window):
+                if overlap_len + len(prev) + 1 > overlap and overlap_lines:
+                    break
+                overlap_lines.insert(0, prev)
+                overlap_len += len(prev) + 1
+            window = overlap_lines
+            window_start = (i - len(window)) + 1
+            cur_len = sum(len(l) + 1 for l in window)
+        if not window:
+            window_start = i + 1
+        window.append(line)
+        i += 1
+    if window:
+        out.append((window_start, "\n".join(window)))
+
+    # A single line longer than the hard cap still has to fit a request.
+    expanded: list[tuple[int, str]] = []
+    for sl, c in out:
+        if len(c) <= EMBED_CHARS_HARD:
+            expanded.append((sl, c))
+            continue
+        for j in range(0, len(c), EMBED_CHARS_HARD):
+            expanded.append((sl, c[j:j + EMBED_CHARS_HARD]))
+    return [(sl, c) for sl, c in expanded if c.strip()]
+
+
+async def _embed_texts(texts: list[str]) -> list[list[float]]:
+    """Embed a list of texts via Ollama (batched). Order-preserving result."""
+    out: list[list[float]] = []
+    for start in range(0, len(texts), EMBED_BATCH):
+        batch = texts[start:start + EMBED_BATCH]
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{OLLAMA_BASE_URL}/api/embed",
+                json={"model": EMBED_MODEL, "input": batch},
+            )
+        if resp.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Embedding model '{EMBED_MODEL}' unavailable "
+                       f"(Ollama HTTP {resp.status_code})",
+            )
+        data = resp.json()
+        embs = data.get("embeddings") or []
+        if len(embs) != len(batch):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Ollama returned {len(embs)} embeddings for {len(batch)} inputs",
+            )
+        out.extend(embs)
+    return out
+
+
+async def project_index(project_id: str) -> dict:
+    """Embed every file in a project into the RAG index (idempotent)."""
+    files = database.project_files_with_content(project_id)
+    total_chunks = 0
+    for f in files:
+        chunks = _split_chunks(f["content"])
+        total_chunks += len(chunks)
+        if not chunks:
+            continue
+        texts = [c for _sl, c in chunks]
+        embs = await _embed_texts(texts)
+        rows = [
+            (idx, content,
+             sl, sl + max(0, content.count("\n")),
+             np.asarray(emb, dtype=np.float32).tobytes())
+            for idx, (sl, content), emb in zip(range(len(chunks)), chunks, embs)
+        ]
+        database.chunks_add(project_id, f["id"], rows)
+    return {
+        "ok": True,
+        "project_id": project_id,
+        "files_indexed": len(files),
+        "chunks": total_chunks,
+    }
+
+
+def _cosine(query: np.ndarray, vecs: np.ndarray) -> np.ndarray:
+    """Cosine similarity of one query vector against a matrix of vectors."""
+    qn = np.linalg.norm(query)
+    if qn == 0:
+        return np.zeros(len(vecs))
+    qn2 = query / qn
+    nn = np.linalg.norm(vecs, axis=1, keepdims=True)
+    nn[nn == 0] = 1.0
+    return (vecs / nn) @ qn2
+
+
+async def project_search(project_id: str, query: str, k: int = 10) -> dict:
+    """Cosine top-k chunks for a project against a natural-language query."""
+    k = max(1, min(k, 50))
+    chunks = database.chunks_with_paths(project_id)
+    if not chunks:
+        return {"query": query, "k": k, "results": []}
+    vecs = np.stack([np.frombuffer(c["embedding"], dtype=np.float32) for c in chunks])
+    qv = np.asarray((await _embed_texts([query]))[0], dtype=np.float32)
+    sim = _cosine(qv, vecs)
+    order = sim.argsort()[::-1][:k]
+    results = []
+    for idx in order:
+        c = chunks[idx]
+        snippet = c["content"]
+        results.append({
+            "file": c["file_path"],
+            "chunk_index": c["chunk_index"],
+            "start_line": c["start_line"],
+            "end_line": c["end_line"],
+            "score": round(float(sim[idx]), 4),
+            "content": snippet,       # full chunk text (for context building)
+            "snippet": snippet[:MAX_SEARCH_CHARS],  # truncated (for the search UI)
+        })
+    return {"query": query, "k": k, "results": results}
+
+
+def _fmt_snippet(c: dict) -> str:
+    head = f"{c['start_line']}-{c['end_line']}" if c.get("start_line") else "?"
+    return (
+        f"### {c.get('file') or 'file'} (lines {head})\n"
+        f"```\n{c.get('content') or c.get('snippet') or ''}\n```"
+    )
+
+
+async def _rag_context_for_question(project_ids: list[str], question: str) -> tuple[str, int]:
+    """Search each selected project with the user's question and assemble a
+    labelled code-context block for the prompt. Returns ('', 0) if nothing."""
+    picks: list[dict] = []
+    for pid in project_ids:
+        try:
+            res = await project_search(pid, question, k=RAG_CONTEXT_CHUNKS)
+        except HTTPException:
+            continue  # project mid-index / embeddings gone — skip, keep the rest
+        picks.extend(res.get("results", []))
+    if not picks:
+        return ("", 0)
+    header = (
+        "\n\nHere is the most relevant code from the imported project "
+        "(file:line references). Use it to ground your answer:\n\n"
+        + "\n\n".join(_fmt_snippet(c) for c in picks)
+    )
+    return (header, len(picks))
+
+
+@app.post("/api/projects/{project_id}/index")
+async def project_index_endpoint(project_id: str):
+    """(Re)build the RAG index for a project. Idempotent — safe to re-call."""
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    database.embeddings_clear(project_id)
+    return await project_index(project_id)
+
+
+@app.get("/api/projects/{project_id}/search")
+async def project_search_endpoint(project_id: str, q: str, k: int = 10):
+    """Cosine top-k semantic search over the project's indexed chunks."""
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not q or not q.strip():
+        raise HTTPException(status_code=422, detail="'q' (the query) is required")
+    return await project_search(project_id, q.strip(), k=k)
+
+
 def _system_prompt() -> str:
     """System prompt from the SQLite settings store (per P3.4)."""
     return (database.setting_get("system_prompt", database.DEFAULT_SYSTEM_PROMPT) or "").strip()
@@ -649,9 +865,16 @@ async def chat(request: ChatRequest):
         model_to_use = request.model_name or "qwen3.5-9b-64k"
         if request.context_files:
             enhanced_message = add_file_context(request.message, request.context_files)
-        
+
+        # P3.2: imported projects → RAG-picked context (top relevant chunks)
+        prefix = ""
+        if request.project_ids:
+            pids = [p.strip() for p in request.project_ids if p and p.strip()]
+            if pids:
+                prefix, _count = await _rag_context_for_question(pids, request.message)
+
         if not OPENROUTER_API_KEY:  # Default to local Ollama
-            response = await call_ollama(enhanced_message, model_to_use)
+            response = await call_ollama(enhanced_message, model_to_use, prefix_context=prefix)
         else:
             response = await call_openrouter(enhanced_message)
         
@@ -669,18 +892,24 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def call_ollama(prompt: str, model_name: str) -> str:
+async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") -> str:
     """Call local Ollama API (non-streaming).
 
-    Raises HTTPException(502) if the model is unknown or Ollama errors,
-    instead of letting Ollama's error payload surface as a fake 200.
+    ``prefix_context`` is optional code context (RAG picks for project mode)
+    sent ahead of the user message so the model grounds its answer in the repo.
     """
+    # prefix_context is prepended as a labelled code-context block (same shape as
+    # add_file_context's upload/project blocks) — model-agnostic, no extra Ollama
+    # field required. Empty for the classic file-ids flow.
+    full_prompt = (
+        (prefix_context.rstrip() + "\n\n" + prompt) if prefix_context else prompt
+    )
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": model_name,
-                "prompt": prompt,
+                "prompt": full_prompt,
                 "system": _system_prompt(),
                 "stream": False,  # Non-streaming for simple endpoint
                 "options": _ollama_options(),
@@ -701,13 +930,19 @@ async def call_ollama(prompt: str, model_name: str) -> str:
         return result.get("response", "")
 
 
-async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, None]:
+async def stream_ollama(prompt: str, model_name: str, prefix_context: str = "") -> AsyncGenerator[str, None]:
     """Stream responses from Ollama in real-time.
+
+    ``prefix_context`` (RAG picks for project mode) is prepended to the
+    prompt as a labelled code-context block before streaming begins.
 
     Errors (unknown model, Ollama down, 5xx) are delivered as a single
     SSE `error` frame followed by `[DONE]`, so the frontend can render an
     error card instead of hanging on an empty stream.
     """
+    full_prompt = (
+        (prefix_context.rstrip() + "\n\n" + prompt) if prefix_context else prompt
+    )
     emitted_done = False
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -716,7 +951,7 @@ async def stream_ollama(prompt: str, model_name: str) -> AsyncGenerator[str, Non
                 f"{OLLAMA_BASE_URL}/api/generate",
                 json={
                     "model": model_name,
-                    "prompt": prompt,
+                    "prompt": full_prompt,
                     "system": _system_prompt(),
                     "stream": True,  # Enable streaming
                     "options": _ollama_options(),
@@ -759,6 +994,7 @@ async def stream_chat(
     message: str,
     model_name: str = "qwen3.5-9b-64k:latest",
     file_ids: Optional[str] = None,
+    project_ids: Optional[str] = None,
 ):
     """
     Stream API endpoint using Server-Sent Events (SSE).
@@ -767,17 +1003,25 @@ async def stream_chat(
     - message: User's prompt
     - model_name: Which Ollama model to use
     - file_ids: Comma-separated uploaded file IDs to include as context
+    - project_ids: Comma-separated imported-project IDs — when present, the
+      message is RAG-augmented (top relevant chunks from those projects)
 
     Returns real-time tokens as they're generated by the LLM.
     Frontend receives events and appends to display progressively.
     """
-    # Inject selected uploaded files into the prompt
+    # Classic flow: selected uploaded/project files concatenated into the prompt.
     ids = [fid.strip() for fid in file_ids.split(",") if fid.strip()] if file_ids else None
     if ids:
         message = add_file_context(message, ids)
 
+    # P3.2: project mode — RAG-augment the message with the top relevant chunks.
+    prefix = ""
+    pids = [p.strip() for p in project_ids.split(",") if p.strip()] if project_ids else []
+    if pids:
+        prefix, _count = await _rag_context_for_question(pids, message)
+
     return StreamingResponse(
-        stream_ollama(message, model_name),
+        stream_ollama(message, model_name, prefix_context=prefix),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

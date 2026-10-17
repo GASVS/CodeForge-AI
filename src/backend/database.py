@@ -482,3 +482,38 @@ def embeddings_clear(project_id: str) -> None:
         get_db().execute("DELETE FROM embeddings WHERE project_id=?",
                          (project_id,))
         get_db().commit()
+
+
+def project_files_with_content(project_id: str) -> list[dict]:
+    """Every file in a project with its full text (for RAG indexing)."""
+    with _lock:
+        rows = get_db().execute(
+            "SELECT id, content FROM project_files WHERE project_id=? ORDER BY path",
+            (project_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def project_indexed(project_id: str) -> bool:
+    """True if this project already has at least one stored embedding."""
+    with _lock:
+        n = get_db().execute(
+            "SELECT COUNT(*) FROM embeddings WHERE project_id=?",
+            (project_id,)).fetchone()[0]
+    return n > 0
+
+
+def chunks_with_paths(project_id: str) -> list[dict]:
+    """All embedded chunks for a project, joined with their file's repo path.
+
+    ``file_path`` is ``None`` only if the file was deleted after embedding
+    (shouldn't happen — project_delete cleans both tables).
+    """
+    with _lock:
+        rows = get_db().execute(
+            "SELECT e.chunk_index, e.content, e.start_line, e.end_line, e.embedding, "
+            "       f.id AS fid, f.path AS file_path "
+            "FROM embeddings e LEFT JOIN project_files f "
+            "  ON (f.project_id = e.project_id AND f.id = e.file_ref) "
+            "WHERE e.project_id=? ORDER BY f.path, e.chunk_index",
+            (project_id,)).fetchall()
+    return [dict(r) for r in rows]

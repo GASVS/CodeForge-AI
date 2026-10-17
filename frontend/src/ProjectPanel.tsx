@@ -19,6 +19,14 @@ interface ProjectMeta {
   files?: ProjectFileMeta[];
 }
 
+interface SearchHit {
+  file: string | null;
+  start_line: number;
+  end_line: number;
+  score: number;
+  snippet: string;
+}
+
 interface Props {
   selectedFiles: Set<string>;
   setSelectedFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -26,6 +34,10 @@ interface Props {
   /** Called with the current project's file IDs after load/switch/delete so
       the app can drop their stale selections/counts. */
   onFilesChange?: (fileIds: readonly string[]) => void;
+  /** P3.2 RAG mode: project ID whose semantic index grounds chat answers.
+      Set/unset from the panel's "semantic questions" toggle. */
+  ragProjectId: string | null;
+  setRagProjectId: (id: string | null) => void;
 }
 
 interface DirNode {
@@ -161,7 +173,7 @@ function ProjectTree({
   );
 }
 
-export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, onFilesChange }: Props) {
+export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, onFilesChange, ragProjectId, setRagProjectId }: Props) {
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
   const zipInputRef = useRef<HTMLInputElement>(null);
 
@@ -172,9 +184,55 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
+  // P3.2: semantic search over this project's RAG index
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  const resetSearch = () => {
+    setQuery('');
+    setResults(null);
+    setSearchError(null);
+  };
+
   const flashTimer = (msg: string) => {
     setFlash(msg);
     setTimeout(() => setFlash(null), 4000);
+  };
+
+  // P3.2: semantic search ("Where is X defined?") over the active project's
+  // RAG index — top-k chunks with file + lines, straight from the backend.
+  const ragActive = active?.id !== null && ragProjectId === active?.id;
+
+  const runSearch = async () => {
+    if (!active) return;
+    const q = query.trim();
+    if (!q) return;
+    setSearching(true);
+    setSearchError(null);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/projects/${active.id}/search?q=${encodeURIComponent(q)}&k=10`
+      );
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // 502 = embedding model down → index can't answer; point at the import
+        setSearchError(
+          d.detail?.startsWith?.('Embedding model') || res.status === 502
+            ? 'Embedding model unavailable — import the project (or retry) to rebuild its index'
+            : d.detail || `Search failed (${res.status})`
+        );
+        setResults([]);
+      } else {
+        setResults(d.results || []);
+      }
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : 'Search failed');
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const loadProjectFiles = useCallback(async (p: ProjectMeta) => {
@@ -183,7 +241,8 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
     const d = await res.json();
     const files: ProjectFileMeta[] = d.files || [];
     setActiveFiles(files);
-    onFilesChange?.(files.map(f => f.id));
+    onFilesChange?.(files.map((f: ProjectFileMeta) => f.id));
+    resetSearch();
   }, [API_URL, onFilesChange]);
 
   const loadProjects = useCallback(async () => {
@@ -296,6 +355,8 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
       removed.forEach(id => next.delete(id));
       return next;
     });
+    // RAG mode can't survive the project it points at.
+    if (ragProjectId === p.id) setRagProjectId(null);
     const res = await fetch(`${API_URL}/api/projects/${p.id}`, { method: 'DELETE' });
     if (!res.ok) {
       setError('Delete failed');
@@ -513,6 +574,78 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
           {flash}
         </div>
       )}
+
+      {/* P3.2: semantic search over this project's RAG index */}
+      <div className={`mx-3 mt-3 p-3 rounded-lg border ${theme === 'dark' ? 'bg-slate-800/40 border-slate-700' : 'bg-white border-gray-200'}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-sm" aria-hidden>🔍</span>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !searching) void runSearch(); }}
+            placeholder='Ask about this project — "Where is the DB path set?"'
+            className={`flex-1 min-w-0 bg-transparent outline-none text-sm placeholder:opacity-50 ${theme === 'dark' ? 'text-slate-100 placeholder:text-slate-500' : 'text-gray-800 placeholder:text-gray-400'}`}
+            disabled={searching || activeFiles.length === 0}
+          />
+          <button
+            onClick={() => void runSearch()}
+            disabled={searching || !query.trim() || activeFiles.length === 0}
+            className={`text-xs px-2.5 py-1 rounded-lg disabled:opacity-40 transition-colors ${
+              theme === 'dark' ? 'bg-slate-700 hover:bg-slate-600 text-slate-100' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
+            }`}
+          >
+            {searching ? 'Searching…' : 'Search'}
+          </button>
+          <button
+            onClick={() => setRagProjectId(ragActive ? null : (active ? active.id : null))}
+            disabled={!active}
+            className={`text-xs px-2.5 py-1 rounded-lg disabled:opacity-40 transition-colors ${
+              ragActive
+                ? 'bg-emerald-600 text-white'
+                : theme === 'dark' ? 'bg-slate-700 hover:bg-slate-600 text-slate-100' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
+            }`}
+            title={ragActive
+              ? 'Chat answers will be grounded in the most relevant code of this project (click to turn off)'
+              : 'Ground chat answers in the most relevant code of this project'}
+          >
+            {ragActive ? '✓ Semantic answers ON' : 'Semantic answers'}
+          </button>
+        </div>
+        {ragActive && (
+          <p className={`mt-2 text-xs ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-600'}`}>
+            On — each chat reply about projects will cite the most relevant code (file + lines) before answering.
+          </p>
+        )}
+        {searchError && (
+          <div className="mt-2 p-2 rounded-lg bg-rose-500/10 text-rose-500 text-xs">⚠️ {searchError}</div>
+        )}
+        {results !== null && (
+          <div className={`mt-2 max-h-56 overflow-y-auto divide-y ${theme === 'dark' ? 'divide-slate-700' : 'divide-gray-200'}`}>
+            {results.length === 0 && (
+              <p className={`text-xs py-2 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>
+                No matches — the project may not be indexed yet (import it to build its index).
+              </p>
+            )}
+            {results.map((r, i) => (
+              <div key={i} className="py-2">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className={`font-mono ${theme === 'dark' ? 'text-slate-200' : 'text-gray-800'}`}>
+                    {(r.file || 'unknown file')}:{r.start_line}–{r.end_line}
+                  </span>
+                  <span className={`ml-auto ${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'}`}>
+                    {(r.score * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <pre className={`mt-1 text-xs whitespace-pre-wrap font-mono max-h-28 overflow-hidden ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>
+                  {r.snippet.slice(0, 400)}
+                  {r.snippet.length > 400 ? '…' : ''}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* File tree */}
       <div className="max-h-64 overflow-y-auto p-2">
