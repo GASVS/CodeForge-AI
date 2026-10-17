@@ -108,6 +108,8 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Live reference to the active SSE stream so the Stop button can abort it
   const streamRef = useRef<{ es: EventSource; close: (reason?: 'done' | 'stop' | 'timeout') => void } | null>(null);
+  // Ref so the "Refactor" code action can prefill + focus the input box
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -467,6 +469,75 @@ function App() {
     'Generate a React component for a login form',
   ];
 
+  // ── P3.3 code actions ────────────────────────────────────────────────
+  // One-click chips above the input bar. Each composes a self-contained
+  // prompt template and runs it against the CURRENT context (selected files
+  // via file_ids, or the RAG project via project_ids). "Refactor" is
+  // free-form: it prefills the input so the user adds the target pattern.
+  const codeActions = [
+    {
+      icon: '💡',
+      label: 'Explain this file',
+      build: () =>
+        'Explain the attached code, file by file. ' +
+        'Walk through its structure and purpose, then go through each ' +
+        'function/class in order explaining what it does, how its parts ' +
+        'interact, and any non-obvious behavior. ' +
+        'Cite the file path and function names you refer to. ' +
+        'If no code is attached, ask me which file to use.',
+    },
+    {
+      icon: '🧪',
+      label: 'Generate unit tests',
+      build: () =>
+        'Write a comprehensive unit-test suite for the attached code, ' +
+        'one code block per file. ' +
+        'Cover the happy path, edge cases (empty, null, boundary values), ' +
+        'and error handling for every public function or class. ' +
+        'Use the same language/framework the code uses and state your ' +
+        'assumptions. ' +
+        'If no code is attached, ask me which file to use.',
+    },
+    {
+      icon: '🧹',
+      label: 'Find dead code',
+      build: () =>
+        'Review the attached code for dead or unused code. ' +
+        'List: (1) unused imports, (2) functions/variables/classes that are ' +
+        'never referenced, and (3) unreachable or redundant branches. ' +
+        'For each item give the file, line (if identifiable), and why it is ' +
+        'likely dead. Then suggest the minimal safe removal for each. ' +
+        'If no code is attached, ask me which file(s) to use.',
+    },
+  ];
+
+  const runCodeAction = (build: () => string) => {
+    // The backend picks the top relevant chunks (RAG) or the explicit
+    // selected files (file_ids). If neither is attached the action still
+    // sends — the prompt template asks the model to request the file — but
+    // we nudge toward context so the answer is grounded.
+    sendMessage(build());
+  };
+
+  // "Refactor" is free-form: prefill the input box and let the user add the
+  // target pattern before pressing send.
+  const prefillRefactor = () => {
+    const target = prompt(
+      'What pattern or convention should the attached code be refactored to?\n' +
+        '(e.g. "use dataclasses", "extract repeated logic into a helper", "follow SOLID")'
+    );
+    if (target == null) return; // cancelled → do nothing
+    const text =
+      'Refactor the attached code to: ' +
+      (target.trim() || 'follow clean, conventional best practices') +
+      '. Keep the public behavior identical. ' +
+      'Return the full refactored code in a code block per file, then a short ' +
+      'list of the specific changes you made and why. ' +
+      'If no code is attached, ask me which file to use.';
+    setInput(text);
+    inputRef.current?.focus();
+  };
+
   // Theme-aware styles
   const containerBg = theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50';
   const textColor = theme === 'dark' ? 'text-slate-100' : 'text-gray-900';
@@ -762,7 +833,36 @@ function App() {
       )}
 
       {/* Input Area */}
-      <div className={`fixed bottom-0 left-0 right-0 border-t ${borderColor} ${headerBg} p-4`}>
+      <div className={`fixed bottom-0 left-0 right-0 border-t ${borderColor} ${headerBg} px-4 pt-2 pb-4`}>
+        <div className="max-w-6xl mx-auto">
+          {/* P3.3 code actions — one-click chips above the input bar. They run
+              against whatever context is attached (selected files or the RAG
+              project). Compact + horizontally scrollable so they never push the
+              input off-screen. */}
+          <div className="flex gap-2 overflow-x-auto no-scrollbar mb-2 pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'none' }}>
+            {codeActions.map((a) => (
+              <button
+                key={a.label}
+                onClick={() => runCodeAction(a.build)}
+                disabled={isLoading}
+                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${theme === 'dark' ? 'bg-slate-900 border-slate-700 hover:border-indigo-500 hover:text-indigo-300 text-slate-300' : 'bg-white border-gray-200 hover:border-indigo-500 hover:text-indigo-600 text-gray-600'} disabled:opacity-40 disabled:cursor-not-allowed`}
+                title={a.label}
+              >
+                <span>{a.icon}</span>
+                {a.label}
+              </button>
+            ))}
+            <button
+              onClick={prefillRefactor}
+              disabled={isLoading}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${theme === 'dark' ? 'bg-slate-900 border-slate-700 hover:border-indigo-500 hover:text-indigo-300 text-slate-300' : 'bg-white border-gray-200 hover:border-indigo-500 hover:text-indigo-600 text-gray-600'} disabled:opacity-40 disabled:cursor-not-allowed`}
+              title="Refactor to a pattern…"
+            >
+              <span>🔁</span>
+              Refactor…
+            </button>
+          </div>
+        </div>
         <div className="max-w-6xl mx-auto flex items-center gap-2">
           {/* Context button — cycles: attach files → import project → close */}
           <button
@@ -811,6 +911,7 @@ function App() {
           <div className="flex-1 flex items-center gap-2 min-w-0">
             <input
               type="text"
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && !isLoading && sendMessage(input)}

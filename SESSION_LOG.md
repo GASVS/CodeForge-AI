@@ -4,7 +4,7 @@
 > After EVERY completed action, append its status below *before* touching the next task, with commit hash + one verification line.
 > If the session crashes, the next session reads this file FIRST and resumes from here.
 
-**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-10-14:** Weeks 1–3 shipped; P2.x all done; **P3.1 COMPLETE (backend 3611251 + frontend this session)** — folder/zip import, file-tree panel, project-file context in chat all verified live. 18/18 backend tests, 4/4 vitest, tsc/build green. **Current objective: P3.2 semantic search (RAG) → P3.3 code actions → P3.4 settings → Phase 4 polish → Phase 5 launch.**
+**Project goal (unchanged)**: Free, privacy-first, open-source AI coding assistant (local Ollama models, code-aware chat). **Status 2026-10-17:** Weeks 1–3 shipped; P2.x all done; **P3.1 COMPLETE (backend 3611251 + frontend panel)**; **P3.2 COMPLETE (this session 2026-10-17)** — RAG: chunk+embed on import (nomic-embed-text), `GET /api/projects/{id}/search` top-k, `semantic answers` toggle grounds chat, live-verified end-to-end. **Current objective: P3.3 code actions → P3.4 settings → Phase 4 polish → Phase 5 launch.**
 
 ---
 
@@ -48,6 +48,13 @@
 ---
 
 ## 🔁 ACTION LOG (newest last)
+
+### Session 2026-10-17 — P3.2 SEMANTIC SEARCH (RAG): backend + tests + panel, LIVE-VERIFIED
+- [✅] **P1 Backend** (`main.py` + `database.py`, from the pre-crash in-flight state): `POST /api/projects` now best-effort-indexes the import (`project_index`), so search works immediately after import; `POST /api/projects/{id}/index` rebuilds idempotently (404 on missing project); `GET /api/projects/{id}/search?q=&k=` → cosine top-k over the project's chunks (422 on empty query, 404 on unknown project). Chunking: line-boundary windows at ~800 chars with overlap, so no context is dropped at seams (`_split_chunks`). Embedding: Ollama `/api/embed` with `nomic-embed-text` (batched 16), numpy for all vector math — no ChromaDB. New SQLite helpers in `database.py`: `project_files_with_content`, `project_indexed`, `chunks_with_paths` (embeddings JOIN file paths).
+- [✅] **P2 RAG into chat:** `/api/chat` accepts `project_ids` and both `/api/chat` + `/stream/api/chat` thread `_rag_context_for_question` (top-8 relevant chunks per question, labelled with file + line ranges) as a prefix into the Ollama prompt — the model grounds its answer in the repo instead of the naive 5-file concat. Classic `file_ids` flow unchanged and RAG-free.
+- [✅] **P3 Frontend:** `ProjectPanel.tsx` gained the search box (top-k results with file + line range, score, 502-friendly error text) and the "Semantic answers" toggle that arms/disarms RAG grounding for chat; stale RAG IDs are cleared when the active project switches or is deleted. `App.tsx` passes `ragProjectId` through and sends `project_ids` with the stream.
+- [✅] **P4 Verified:** 29/29 backend pytest (11 new RAG tests, embedder mocked — Ollama never contacted in CI); 4/4 vitest; `npx tsc --noEmit` clean; `npm run build` green. **Live E2E:** real `nomic-embed-text` indexed 2 files → query "how does add sum the inputs" ranked `src/math.py:1–8` #1 (score .7248 vs .5265); streaming chat with `project_ids` answered `add(2,3)` → **5** citing `src/math.py:3` in 7 s (Ollama now serves `qwen38-ab-64k:latest`, not `qwen3.5-9b-64k` — worth noting for the model picker); 404/422 + idempotent re-index verified; test project deleted and DB reset to 0 projects/0 embeddings afterwards.
+- [📌] **NEXT:** **P3.3 Code actions** (Explain file / Generate unit tests / Find unused imports / Refactor with a pattern — one-click chips over a real sample file), then P3.4 model & provider config, then Phase 4 UI polish.
 
 ### Session 2026-10-14 — P3.1 FRONTEND: PROJECT FILE-TREE PANEL (closes the "file import + tree panel" half of plan 3.1)
 - [✅] **P1** New `frontend/src/ProjectPanel.tsx` — imports a project (zip upload or folder-pick `webkitdirectory`) via `POST /api/projects`, renders the import tree as a collapsible directory tree (`buildTree`/`sortNode`), per-file checkboxes sharing the app's `selectedFiles` set, "Add all" (respects the backend's 5-file context cap), per-project deselect, project delete (drops that project's stale selections via `onFilesChange` callback), error/flash toasts, theme-aware dark/light.
