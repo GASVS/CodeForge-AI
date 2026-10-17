@@ -152,9 +152,9 @@
 - [x] Verify: each chip works against a sample file; results saved on refresh. (Verified: 29/29 + tsc/build/vitest; live E2E on all 3 send-style actions + persist round-trip; Refactor verified by code path — prefill→focus→normal send.)
 
 ### 3.4 Model & provider settings (close the plan's Phase 1.2)
-- [ ] Settings panel: Ollama base URL (env `OLLAMA_API_URL` already exists — expose read-only status: up/down + model count), default model picker, system prompt field (stored in SQLite `settings`), temperature slider (backend: add `options: {temperature}` to Ollama call — currently missing).
-- [ ] OpenRouter: still option A from 2.2 → show "coming in v1.1" disabled row. (Don't ship a dead control.)
-- [ ] Verify: change system prompt → new chats use it; old ones unaffected.
+- [x] Settings panel: Ollama base URL (env `OLLAMA_API_URL` already exists — expose read-only status: up/down + model count), default model picker, system prompt field (stored in SQLite `settings`), temperature slider (backend: add `options: {temperature}` to Ollama call — currently missing). *(Done: backend `/api/settings` GET/PUT + `/api/ollama/status`; SettingsPanel UI — status badge, model picker, temperature slider + number input, system-prompt textarea, all persisted in SQLite. Verified: 39/39 pytest, tsc/build/vitest green, live E2E — sentinel system prompt returned verbatim by the model on a new chat, settings read back through :3000 proxy.)*
+- [x] OpenRouter: still option A from 2.2 → show "coming in v1.1" disabled row. (Don't ship a dead control.)
+- [x] Verify: change system prompt → new chats use it; old ones unaffected.
 
 ---
 

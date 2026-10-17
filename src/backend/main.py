@@ -856,6 +856,70 @@ def _ollama_options() -> dict:
     return {"temperature": _temperature(), "num_ctx": 8192}
 
 
+# ---------------------------------------------------------------------------
+# Settings (P3.4) — read/write the persisted assistant settings + Ollama status
+# ---------------------------------------------------------------------------
+class SettingsUpdate(BaseModel):
+    temperature: Optional[float] = None
+    system_prompt: Optional[str] = None
+
+
+@app.get("/api/settings")
+async def api_get_settings():
+    """Current assistant settings (defaults applied for absent keys)."""
+    return {
+        "temperature": _temperature(),
+        "system_prompt": _system_prompt(),
+    }
+
+
+@app.put("/api/settings")
+async def api_update_settings(body: SettingsUpdate):
+    """Persist settings. `temperature` clamped to [0,1] (nan/inf -> 0.7);
+    `system_prompt` max 4000 chars. Both are optional — send only what changed."""
+    updates: dict = {}
+    if body.temperature is not None:
+        try:
+            t = float(body.temperature)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="temperature must be a number")
+        if not math.isfinite(t):
+            t = 0.7
+        t = max(0.0, min(1.0, t))
+        database.setting_set("temperature", repr(t))
+        updates["temperature"] = t
+    if body.system_prompt is not None:
+        sp = body.system_prompt.strip()
+        if len(sp) > 4000:
+            raise HTTPException(status_code=422, detail="system_prompt too long (max 4000 chars)")
+        database.setting_set("system_prompt", sp)
+        updates["system_prompt"] = sp
+    return {"ok": True, "updated": list(updates), **(await api_get_settings())}
+
+
+@app.get("/api/ollama/status")
+async def api_ollama_status():
+    """Is Ollama reachable + how many models are installed (live probe)."""
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+        models = r.json().get("models", [])
+        return {
+            "up": True,
+            "model_count": len(models),
+            "models": [m["name"] for m in models],
+            "base_url": OLLAMA_BASE_URL,
+        }
+    except Exception as e:
+        return {
+            "up": False,
+            "model_count": 0,
+            "models": [],
+            "base_url": OLLAMA_BASE_URL,
+            "error": str(e)[:200],
+        }
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     """Main chat endpoint with optional file context"""

@@ -608,8 +608,11 @@ function App() {
             className="fixed inset-0 bg-black/50 z-40"
             onClick={() => setShowSettings(false)}
           />
-          <aside className="fixed left-0 top-0 h-full w-96 bg-slate-900 border-r border-slate-700 z-50 shadow-xl">
+          <aside className={`fixed left-0 top-0 h-full w-96 z-50 shadow-xl border-r ${
+            theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+          }`}>
             <SettingsPanel
+              apiUrl={API_URL}
               model={model}
               setModel={(m: string) => { setModel(m); setShowSettings(false); }}
               availableModels={availableModels}
