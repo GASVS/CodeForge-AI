@@ -143,13 +143,13 @@
 - [x] Frontend: search box in ProjectPanel ("Where is X defined?") → top-k snippets with file:lines + score; "Semantic answers" toggle grounds chat (`project_ids` on `/stream/api/chat` → `_rag_context_for_question` top-8 chunks prepended to the prompt).
 - [x] Verify: ask "where is add defined" → `src/math.py:1–8` #1 (score .7248 > .5265), answered from context with `src/math.py:3` cited in 7 s. 29/29 backend tests, tsc/build/vitest green.
 
-### 3.3 Code actions (v1 set, keep it to four)
-- [ ] "Explain this file" — prompt template + context = that file → answer with inline references.
-- [ ] "Generate unit test" — context = file → answer in a code block with a copy button (copy button exists on markdown blocks — verify).
-- [ ] "Find dead code / unused imports" — context = selected files.
-- [ ] "Refactor to follow this pattern" — free text + selected files.
-- [ ] All actions: one-click chips above the input bar; record the action + context in the stored chat so history stays meaningful.
-- [ ] Verify: each chip works against a sample file; results saved on refresh.
+### 3.3 Code actions (v1 set, keep it to four) — ✅ DONE 2026-10-17 (`App.tsx`: 4 one-click chips above the input bar, reusing the stream pipeline + selected files/RAG context; live-verified: explain cites `calc.py`/`add`/`square_table`, dead-code audit flags unused imports + unreferenced symbols, unit-test suite generated; copy buttons on code blocks already present)
+- [x] "Explain this file" — prompt template + context = that file → answer with inline references.
+- [x] "Generate unit test" — context = file → answer in a code block with a copy button (copy button already on markdown blocks — verified at the ReactMarkdown `code` override).
+- [x] "Find dead code / unused imports" — context = selected files.
+- [x] "Refactor to follow this pattern" — free text + selected files (chip asks for the pattern, prefills + focuses the input).
+- [x] All actions: one-click chips above the input bar; record the action + context in the stored chat so history stays meaningful (prompt text + streamed answer persist via the existing `persistChat` path — read-back verified).
+- [x] Verify: each chip works against a sample file; results saved on refresh. (Verified: 29/29 + tsc/build/vitest; live E2E on all 3 send-style actions + persist round-trip; Refactor verified by code path — prefill→focus→normal send.)
 
 ### 3.4 Model & provider settings (close the plan's Phase 1.2)
 - [ ] Settings panel: Ollama base URL (env `OLLAMA_API_URL` already exists — expose read-only status: up/down + model count), default model picker, system prompt field (stored in SQLite `settings`), temperature slider (backend: add `options: {temperature}` to Ollama call — currently missing).
