@@ -160,7 +160,7 @@
 
 ## Phase 4 — UX polish
 
-- [ ] **Code highlighting in responses:** `react-markdown` already renders; add `remark-gfm` tables (dep present) + `react-syntax-highlighter` (Prism light) theme-matched to light/dark. Verify: a Python code block shows colors in both themes.
+- [x] **Code highlighting in responses:** `react-markdown` already renders; add `remark-gfm` tables (dep present) + `react-syntax-highlighter` (Prism light) theme-matched to light/dark. Verify: a Python code block shows colors in both themes. **DONE 2026-10-18** — PrismLight (python/js/ts/bash/json/css/jsx) + one-dark/one-light, line numbers >4 lines, copy button retained; tsc/build/tests green (9/9).
 - [ ] **Empty states:** no chats yet → "Start your first conversation" card with the 4 action chips; no model → "Ollama offline" card with a button that POSTs `ollama pull qwen3.5:9b`… (no — keep it copy-safe: show the exact command in a code block, no execution).
 - [ ] **Keyboard:** Enter=send, Shift+Enter=newline (verify), `Ctrl/Cmd+K` → focus search box (file-panel search), `Esc` closes settings.
 - [ ] **Responsive:** ≤768 px → sidebar collapses to a drawer; file panel toggles like on mobile. Verify at 390 px and 1440 px widths.
