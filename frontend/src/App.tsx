@@ -8,6 +8,24 @@ import FileContext from './FileContext';
 import ProjectPanel from './ProjectPanel';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python';
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript';
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript';
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash';
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json';
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css';
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx';
+import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark';
+import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light';
+
+SyntaxHighlighter.registerLanguage('python', python);
+SyntaxHighlighter.registerLanguage('javascript', javascript);
+SyntaxHighlighter.registerLanguage('typescript', typescript);
+SyntaxHighlighter.registerLanguage('bash', bash);
+SyntaxHighlighter.registerLanguage('json', json);
+SyntaxHighlighter.registerLanguage('css', css);
+SyntaxHighlighter.registerLanguage('jsx', jsx);
 
 interface UploadedFile {
   id: string;
@@ -757,15 +775,22 @@ function App() {
                               
                               if (!inline && match) {
                                 return (
-                                  <div className="relative my-3 rounded-lg overflow-hidden">
-                                    <pre className={`p-4 ${theme === 'dark' ? 'bg-slate-950' : 'bg-gray-100'} overflow-x-auto`}>
-                                      <code className={className} {...props}>
-                                        {children}
-                                      </code>
-                                    </pre>
+                                  <div className={`relative my-3 rounded-lg overflow-hidden`}>
+                                    <div className={`w-full ${theme === 'dark' ? 'bg-slate-950' : 'bg-gray-100'}`}>
+                                      <SyntaxHighlighter
+                                    language={language}
+                                        style={theme === 'dark' ? oneDark : oneLight}
+                                        showLineNumbers={codeText.split('\n').length > 4}
+                                        customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '0.8rem' }}
+                                        codeTagProps={{ style: { background: 'transparent', fontFamily: 'inherit' } }}
+                                        lineNumberStyle={{ opacity: 0.4, paddingRight: '1rem', minWidth: '2.5rem', textAlign: 'right' }}
+                                      >
+                                        {codeText}
+                                      </SyntaxHighlighter>
+                                    </div>
                                     <button
                                       onClick={() => navigator.clipboard.writeText(codeText)}
-                                      className="absolute top-2 right-2 p-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition-colors"
+                                      className={`absolute top-2 right-2 p-2 rounded-lg transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-gray-200 text-gray-600 shadow'}`}
                                       title="Copy code"
                                     >
                                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
