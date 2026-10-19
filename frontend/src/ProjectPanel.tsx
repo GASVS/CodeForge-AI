@@ -581,6 +581,7 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
           <span className="text-sm" aria-hidden>🔍</span>
           <input
             type="text"
+            data-codeforge-search
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !searching) void runSearch(); }}

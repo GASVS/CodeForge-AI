@@ -104,6 +104,10 @@ function App() {
   const [streamStarted, setStreamStarted] = useState(false);
   const [model, setModel] = useState('qwen3.5-9b-64k:latest');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  // Phase 4.2 empty states: null = haven't reached the backend yet,
+  // true = Ollama/models reachable, false = Ollama (or backend) offline.
+  // Drives the "Ollama offline" card on the empty state.
+  const [ollamaUp, setOllamaUp] = useState<boolean | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -115,6 +119,10 @@ function App() {
   // Live set of the current project's file IDs (kept from the last panel load so
   // we can drop stale selections when a project is replaced/deleted).
   const lastProjectFileIds = useRef<Set<string>>(new Set());
+  // Keyboard (Phase 4.2): a Ctrl/Cmd+K pressed while NO panel is open should
+  // open the projects panel and THEN focus its search box — focus happens in
+  // this effect after the panel has committed to the DOM.
+  const searchFocusArmed = useRef(false);
   // P3.2 RAG mode: when set, chat sends `project_ids=<id>` instead of the
   // selected-file concat — the backend picks the top relevant chunks for the
   // question. Toggled from ProjectPanel; cleared when the active project is
@@ -126,8 +134,10 @@ function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // Live reference to the active SSE stream so the Stop button can abort it
   const streamRef = useRef<{ es: EventSource; close: (reason?: 'done' | 'stop' | 'timeout') => void } | null>(null);
-  // Ref so the "Refactor" code action can prefill + focus the input box
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Ref so the "Refactor" code action can prefill + focus the input box.
+  // Phase 4.2: the box is now a (1-line) auto-growing textarea so
+  // Shift+Enter inserts a real newline — Enter alone still sends.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -140,23 +150,37 @@ function App() {
     }
   }, []);
 
-  // Fetch available models on mount
-  useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/models`);
-        const data = await res.json();
-        const models: string[] = data.models || [];
+  // Fetch available models; also records Ollama reachability for the
+  // empty-state "offline" card. Exposed (not just called from the effect)
+  // so the card's "Check again" button can re-probe without a remount.
+  const fetchModels = () =>
+    fetch(`${API_URL}/api/models`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        const models: string[] = (data && data.models) || [];
         setAvailableModels(models);
+        setOllamaUp(true);
         // Fall back to the first locally available model if the default isn't installed
         setModel((current) =>
           models.length > 0 && !models.includes(current) ? models[0] : current
         );
-      } catch (err) {
+      })
+      .catch(err => {
         console.error('Failed to fetch models:', err);
-      }
-    };
+        setAvailableModels([]);
+        setOllamaUp(false);
+      });
+
+  useEffect(() => {
     fetchModels();
+    // Keep the empty state honest while it's on screen: re-probe every 10 s
+    // so "check again" is also automatic once Ollama comes back.
+    const t = setInterval(fetchModels, 10000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [API_URL]);
 
   const loadChatList = () =>
@@ -263,6 +287,52 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // ── Phase 4.2 keyboard shortcuts ───────────────────────────────────
+  // Esc  → close the topmost overlay (context panel → logs → settings → history)
+  // ⌘/Ctrl+K → open the projects panel if needed, then focus its search box
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (contextTab !== null) setContextTab(null);
+        else if (showLogs) setShowLogs(false);
+        else if (showSettings) setShowSettings(false);
+        else if (showSidebar) setShowSidebar(false);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        const focusSearch = () => {
+          const el = document.querySelector<HTMLInputElement>('[data-codeforge-search]');
+          el?.focus();
+          el?.select();
+        };
+        if (contextTab === 'projects') {
+          // already open → focus immediately
+          focusSearch();
+        } else {
+          searchFocusArmed.current = true;
+          setContextTab('projects');
+        }
+        return;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [contextTab, showLogs, showSettings, showSidebar]);
+
+  // Second half of ⌘/Ctrl+K: the panel just mounted — focus its search box.
+  useEffect(() => {
+    if (!searchFocusArmed.current) return;
+    searchFocusArmed.current = false;
+    const t = setTimeout(() => {
+      const el = document.querySelector<HTMLInputElement>('[data-codeforge-search]');
+      el?.focus();
+      el?.select();
+    }, 50);
+    return () => clearTimeout(t);
+  }, [contextTab]);
+
 
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
@@ -480,13 +550,6 @@ function App() {
     lastProjectFileIds.current = next;
   };
 
-  const suggestions = [
-    'Explain how async/await works in JavaScript',
-    'Write a Python function to parse JSON files',
-    'What is the difference between map and filter?',
-    'Generate a React component for a login form',
-  ];
-
   // ── P3.3 code actions ────────────────────────────────────────────────
   // One-click chips above the input bar. Each composes a self-contained
   // prompt template and runs it against the CURRENT context (selected files
@@ -553,8 +616,48 @@ function App() {
       'list of the specific changes you made and why. ' +
       'If no code is attached, ask me which file to use.';
     setInput(text);
-    inputRef.current?.focus();
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (el) el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+      el?.focus();
+    });
   };
+
+  // Phase 4.2: every conversation starts life with a placeholder assistant
+  // message (id `welcome` at boot, `welcome-<ts>` after "Clear chat").
+  // `messages.length === 1 && isWelcome` = no real user turn exists yet →
+  // the empty-state card is the right thing to show. Restored/persisted chats
+  // use `${chatId}-${i}` ids instead, so a one-message persisted chat still
+  // renders as a normal bubble (unchanged behavior).
+  const isWelcome = messages.length === 1 &&
+    (messages[0].id === 'welcome' || messages[0].id.startsWith('welcome-'));
+
+  // Shared by the code-block copy button and the empty-state "ollama pull"
+  // snippet: best-effort clipboard write, and while the app is offline the
+  // button's title still tells the user what to select-copy.
+  const ClipboardCopyButton = ({ text, className, title }: {
+    text: string; className: string; title: string;
+  }) => (
+    <button
+      onClick={(e) => {
+        const el = e.currentTarget;
+        navigator.clipboard?.writeText(text).catch(() => {
+          /* clipboard blocked (permissions/https) — text is still selectable */
+        });
+        const old = el.innerHTML;
+        el.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(() => { el.innerHTML = old; }, 1200);
+      }}
+      title={title}
+      type="button"
+      className={className}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+    </button>
+  );
 
   // Theme-aware styles
   const containerBg = theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50';
@@ -722,30 +825,85 @@ function App() {
 
       {/* Chat Area */}
       <main className="w-full max-w-[1100px] mx-auto px-4 pb-32">
-        {messages.length === 1 && messages[0].id === 'welcome' ? (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-400 w-full">
-            <div className="mb-6">
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-indigo-500">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-              </svg>
-            </div>
-            <h2 className="text-2xl font-semibold text-slate-200 mb-2">Welcome to your AI assistant</h2>
-            <p className="text-center max-w-md mb-8">
-              Ask me anything about code, explain concepts, generate functions, or chat freely.
-              Running locally with Ollama — 100% private.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3 max-w-lg w-full">
-              {suggestions.map((suggestion, i) => (
+        {isWelcome ? (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] w-full py-8">
+            {/* Ollama reachable (or unknown): the normal start card */}
+            {ollamaUp !== false ? (
+              <>
+                <div className="mb-6">
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-indigo-500">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-semibold mb-2">Start your first conversation</h2>
+                <p className="text-center max-w-md mb-8 opacity-70">
+                  Attach a file or import your project with the 📎 button, then pick an action —
+                  or just ask. Running locally with Ollama — 100% private.
+                </p>
+                {/* The four code actions, as the primary start points (Phase 4.2).
+                    Each sends its prompt with whatever context is attached; with
+                    nothing attached the model asks which file to use. */}
+                <div className={`grid gap-3 max-w-lg w-full ${theme === 'dark' ? 'text-slate-300' : 'text-gray-600'}`}>
+                  {codeActions.map((a) => (
+                    <button
+                      key={a.label}
+                      onClick={() => runCodeAction(a.build)}
+                      className={`flex items-center gap-3 p-4 rounded-xl border text-left text-sm transition-colors ${
+                        theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-indigo-500'
+                        : 'bg-white border-gray-200 hover:border-indigo-500'
+                      }`}
+                    >
+                      <span className="text-xl shrink-0">{a.icon}</span>
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              /* Ollama (or the backend) unreachable: tell the user exactly how
+                 to fix it. Copy-safe: the pull command is shown + copyable,
+                 never auto-executed (Phase 4.2). */
+              <>
+                <div className="mb-6">
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={theme === 'dark' ? 'text-rose-500' : 'text-rose-500'}>
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-semibold mb-2">Ollama is offline</h2>
+                <p className="text-center max-w-md mb-4 opacity-70">
+                  CodeForge couldn't reach the model runner. Start it, pull a model if you
+                  haven't already, then check again:
+                </p>
+                <div className={`relative max-w-md w-full mb-6 rounded-xl p-4 text-sm font-mono ${
+                  theme === 'dark' ? 'bg-slate-950 border-slate-800 text-slate-300'
+                  : 'bg-gray-100 border-gray-200 text-gray-700'
+                } border`}>
+                  <ClipboardCopyButton
+                    text={'ollama serve\nollama pull qwen3:8b'}
+                    className={`absolute top-2 right-2 p-1.5 rounded-lg ${
+                      theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      : 'bg-white hover:bg-gray-200 text-gray-600 shadow'
+                    }`}
+                    title="Copy setup commands"
+                  />
+                  <div className="flex flex-col gap-1">
+                    <span>$ ollama serve</span>
+                    <span>$ ollama pull qwen3:8b</span>
+                  </div>
+                </div>
                 <button
-                  key={i}
-                  onClick={() => setInput(suggestion)}
-                  className={`p-4 ${theme === 'dark' ? 'bg-slate-900 border-slate-800 hover:border-indigo-500' : 'bg-white border-gray-200 hover:border-indigo-500'} rounded-lg transition-colors text-left text-sm`}
+                  onClick={fetchModels}
+                  className={`shrink-0 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    theme === 'dark' ? 'bg-rose-600 hover:bg-rose-500'
+                    : 'bg-rose-600 hover:bg-rose-700'
+                  } text-white`}
                 >
-                  {suggestion}
+                  Check again
                 </button>
-              ))}
-            </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-4 max-h-[60vh] overflow-y-auto pr-2 mb-4 w-full">
@@ -788,16 +946,11 @@ function App() {
                                         {codeText}
                                       </SyntaxHighlighter>
                                     </div>
-                                    <button
-                                      onClick={() => navigator.clipboard.writeText(codeText)}
+                                    <ClipboardCopyButton
                                       className={`absolute top-2 right-2 p-2 rounded-lg transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-white hover:bg-gray-200 text-gray-600 shadow'}`}
+                                      text={codeText}
                                       title="Copy code"
-                                    >
-                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                      </svg>
-                                    </button>
+                                    />
                                   </div>
                                 );
                               }
@@ -936,16 +1089,28 @@ function App() {
 
           {/* Input + send grouped: the field always takes the full remaining
               width; send sits flush at the right edge — no left dead-zone. */}
-          <div className="flex-1 flex items-center gap-2 min-w-0">
-            <input
-              type="text"
+          <div className="flex-1 flex items-end gap-2 min-w-0">
+            <textarea
+              rows={1}
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !isLoading && sendMessage(input)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                // auto-grow (capped): Shift+Enter produces real newlines
+                const el = e.target;
+                el.style.height = 'auto';
+                el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+              }}
+              onKeyDown={(e) => {
+                // Enter = send, Shift+Enter = newline (Phase 4.2)
+                if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
+                  e.preventDefault();
+                  sendMessage(input);
+                }
+              }}
               placeholder="Type your message..."
               disabled={isLoading}
-              className={`flex-1 min-w-0 ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'} border rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors`}
+              className={`flex-1 min-w-0 resize-none ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'} border rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors`}
             />
 
             {isLoading ? (
