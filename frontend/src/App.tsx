@@ -675,7 +675,7 @@ function App() {
             onClick={() => setShowSidebar(false)}
           />
           <aside
-            className={`fixed left-0 top-0 h-full z-50 shadow-xl overflow-y-auto flex flex-col ${
+            className={`fixed left-0 top-0 h-full w-full md:w-80 z-50 shadow-xl overflow-y-auto flex flex-col ${
               theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
             } border-r`}
           >
@@ -715,7 +715,7 @@ function App() {
           <div
             className={`fixed bottom-0 left-0 right-0 z-50 shadow-2xl ${
               theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
-            } border-t max-h-[70vh] flex flex-col`}
+            } border-t max-h-[70vh] md:max-h-[420px] flex flex-col`}
           >
             <LogsPanel apiUrl={API_URL} theme={theme} onClose={() => setShowLogs(false)} />
           </div>
@@ -729,9 +729,11 @@ function App() {
             className="fixed inset-0 bg-black/50 z-40"
             onClick={() => setShowSettings(false)}
           />
-          <aside className={`fixed left-0 top-0 h-full w-96 z-50 shadow-xl border-r ${
-            theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
-          }`}>
+          <aside
+            className={`fixed left-0 top-0 bottom-0 w-full md:w-96 z-50 shadow-xl overflow-y-auto border-r ${
+              theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+            }`}
+          >
             <SettingsPanel
               apiUrl={API_URL}
               model={model}
