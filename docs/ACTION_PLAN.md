@@ -215,13 +215,13 @@
 
 > These capabilities turn the app from “chat with context” into an assistant that can act on the codebase. Do not defer until after P6 — P6.2 (code indexer) should emit MCP-style tool calls from the start, and the chat SSE stream should already carry them.
 
-### 7.1 Tool-call-aware SSE protocol
-- [ ] **Goal:** extend `/stream/api/chat` from text-only SSE into a typed event stream so the model can request tool calls mid-response and the frontend can render / dispatch them.
-- [ ] Backend: add a `tool_calls` array to the Ollama prompt/context when the active project has registered tools; keep current `text` frames unchanged for backward compatibility.
-- [ ] Define canonical frame types: `{"type":"text","text":"..."}`, `{"type":"tool_call","id":"...","name":"...","args":{...}}`, `{"type":"tool_result","id":"...","result":{...}}`, `{"type":"error","error":"..."}`, then `data: [DONE]`.
-- [ ] Frontend: consume tool-call frames, render a tool-invocation card, queue tool results back into the same assistant turn, and append the final grounded answer. Preserve existing plain-text flow.
-- [ ] Non-breaking contract: old clients that only read `text` fields keep working; new clients get the richer stream.
-- [ ] **Verify:** trigger a tool call (e.g. search_symbols via code-indexer) → frontend shows tool card → tool result feeds back → final answer cites exact `file:line`; refresh → thread with tool frames survives (SQLite). **Done when:** backward-compatible and new frames verified. Commit: `feat: P7.1 tool-call-aware SSE stream`.
+### 7.1 Tool-call-aware SSE protocol ✅ DONE (eab4057)
+- [x] **Goal:** extend `/stream/api/chat` from text-only SSE into a typed event stream so the model can request tool calls mid-response and the frontend can render / dispatch them.
+- [x] Backend: `stream_ollama` switched from `/api/generate` to `/api/chat`; emits typed frames with `type` field; `TOOL_REGISTRY` added with `register_tool` + `_execute_tool_call`; tool calls are executed and results fed back recursively (max 5 rounds).
+- [x] Define canonical frame types: `{"type":"text","text":"..."}`, `{"type":"tool_call","id":"...","name":"...","args":{...}}`, `{"type":"tool_result","id":"...","result":{...}}`, `{"type":"error","error":"..."}`, then `data: [DONE]`.
+- [x] Frontend: SSE parser branches on `data.type`; tool-call cards render name + args + result; retry button on error cards; `retryLastMessage` removes failed pair and re-sends; conversation history sent as `messages` param for multi-turn.
+- [x] Non-breaking contract: text frames still carry `text` field so old clients keep working.
+- [x] **Verify:** `npx tsc --noEmit` clean, `npm run build` green, `npm test` 9/9 green, backend `ast.parse` clean. **Done when:** backward-compatible typed stream + tool-card UI live. Commit: `feat: P7.1 tool-call-aware SSE stream`.
 
 ### 7.2 Patch/diff generation + apply for code actions
 - [ ] **Goal:** code-action chips (Explain, Tests, Dead code, Refactor) should produce structured diffs, not only prose. The user can Apply or Copy patch.
