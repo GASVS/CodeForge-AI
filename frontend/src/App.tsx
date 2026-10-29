@@ -144,6 +144,8 @@ function App() {
   // P7.2 patch apply UI state
   const [patchApplyingId, setPatchApplyingId] = useState<string | null>(null);
   const [patchFeedback, setPatchFeedback] = useState<Record<string, { ok: boolean; message: string }>>({});
+  // P7.3 structured findings selection state (per message id → selected finding indices)
+  const [findingsSelection, setFindingsSelection] = useState<Record<string, number[]>>({});
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -360,6 +362,9 @@ function App() {
     setPatchApplyingId(blockId);
     setPatchFeedback(prev => ({ ...prev, [blockId]: { ok: false, message: 'Applying…' } }));
     try {
+      if (!ragProjectId) {
+        throw new Error('Select a project first');
+      }
       const res = await fetch(`${API_URL}/api/projects/${ragProjectId}/apply-patch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -382,6 +387,16 @@ function App() {
         });
       }, 4000);
     }
+  };
+
+  const toggleFinding = (msgId: string, index: number) => {
+    setFindingsSelection(prev => {
+      const current = prev[msgId] || [];
+      const next = current.includes(index)
+        ? current.filter(i => i !== index)
+        : [...current, index];
+      return { ...prev, [msgId]: next };
+    });
   };
 
   const sendMessage = async (content: string) => {
@@ -661,6 +676,8 @@ function App() {
         'For each item give the file, line (if identifiable), and why it is ' +
         'likely dead. Then emit a unified diff in a fenced ```diff block that ' +
         'removes the dead code. Keep the diff minimal and safe. ' +
+        'Also emit a fenced ```json block with the schema ' +
+        '`{"findings":[{"file":"...","line":12,"kind":"unused_import","symbol":"os","fix":"remove"}, ...]}`. ' +
         'If no code is attached, ask me which file(s) to use.',
     },
   ];
@@ -716,6 +733,28 @@ function App() {
       idx++;
     }
     return blocks;
+  };
+
+  // P7.3: extract structured findings from fenced ```json blocks that contain
+  // a top-level `findings` array (schema v1).
+  type Finding = { file?: string; line?: number; kind?: string; symbol?: string; fix?: string };
+  const extractFindings = (content: string): { id: string; findings: Finding[] }[] => {
+    const regex = /```json\n([\s\S]*?)```/g;
+    const out: { id: string; findings: Finding[] }[] = [];
+    let m: RegExpExecArray | null;
+    let idx = 0;
+    while ((m = regex.exec(content)) !== null) {
+      try {
+        const parsed = JSON.parse(m[1].trim());
+        if (Array.isArray(parsed.findings)) {
+          out.push({ id: `findings-${idx}`, findings: parsed.findings });
+        }
+      } catch {
+        // skip non-JSON or unrelated json blocks
+      }
+      idx++;
+    }
+    return out;
   };
 
   // Shared by the code-block copy button and the empty-state "ollama pull"
@@ -1124,6 +1163,52 @@ function App() {
                                     {feedback && (
                                       <div className={`mt-2 text-xs ${feedback.ok ? 'text-emerald-500' : 'text-rose-500'}`}>{feedback.message}</div>
                                     )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                        {/* P7.3 structured findings list */}
+                        {(() => {
+                          const findingsGroups = extractFindings(msg.content || '');
+                          if (findingsGroups.length === 0) return null;
+                          return (
+                            <div className="mt-3 space-y-2">
+                              {findingsGroups.map(group => {
+                                const selected = findingsSelection[msg.id] || [];
+                                const allSelected = group.findings.length > 0 && selected.length === group.findings.length;
+                                return (
+                                  <div key={group.id} className={`p-3 rounded-lg border ${theme === 'dark' ? 'bg-slate-950 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                      <span className="text-xs font-medium opacity-70">Findings ({group.findings.length})</span>
+                                      <button
+                                        onClick={() => setFindingsSelection(prev => ({ ...prev, [msg.id]: allSelected ? [] : Array.from({ length: group.findings.length }, (_, i) => i) }))}
+                                        className="shrink-0 px-2 py-1 rounded text-xs font-medium transition-colors border border-current opacity-70 hover:opacity-100"
+                                      >
+                                        {allSelected ? 'Deselect all' : 'Select all'}
+                                      </button>
+                                    </div>
+                                    <div className="space-y-1">
+                                      {group.findings.map((f, idx) => {
+                                        const checked = selected.includes(idx);
+                                        return (
+                                          <label key={idx} className={`flex items-start gap-2 text-xs p-2 rounded border cursor-pointer transition-colors ${checked ? (theme === 'dark' ? 'bg-slate-900 border-indigo-500/50' : 'bg-white border-indigo-500/50') : theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-gray-200'}`}>
+                                            <input
+                                              type="checkbox"
+                                              checked={checked}
+                                              onChange={() => toggleFinding(msg.id, idx)}
+                                              className="mt-0.5"
+                                            />
+                                            <span className="flex-1">
+                                              <span className="font-medium">{f.kind || 'unknown'}</span>
+                                              {f.symbol ? <span className="opacity-70 ml-1">{String(f.symbol)}</span> : null}
+                                              {f.file ? <span className="opacity-50 ml-1">{String(f.file)}{f.line != null ? `:${String(f.line)}` : ''}</span> : null}
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
                                 );
                               })}

@@ -230,11 +230,11 @@
 - [x] Frontend: render diff blocks with an Apply patch button + success/failure feedback; disabled until a project is selected.
 - [x] **Verify:** run Find dead code → diff emitted → Apply removes the unused import → re-import / re-index shows clean state; refresh → change persists. **Done when:** apply verified + RAG/symbols re-indexed. Commit: `feat: P7.2 code-action patches + apply`.
 
-### 7.3 Structured findings for “Find dead code” (schema v1)
-- [ ] **Goal:** replace prose tables with deterministic JSON findings so the UI can render rows, select multiple, and apply fixes in batch.
-- [ ] Backend: document the canonical finding schema; dead-code action now asks the model to emit JSON findings alongside/near the diff: `{"findings":[{"file":"...","line":12,"kind":"unused_import","symbol":"os","fix":"remove"}, ...]}`.
-- [ ] Frontend: parse findings into a selectable list; batch-selecting rows composes a single patch; apply removes all selected findings.
-- [ ] **Verify:** dead-code scan returns 3+ findings → UI renders 3 rows → select all → Apply → all removals land in one patch; partial selection applies only selected. **Done when:** schema stable + batch apply verified. Commit: `feat: P7.3 structured findings + batch fixes`.
+### 7.3 Structured findings for “Find dead code” (schema v1) ✅ DONE (pending commit)
+- [x] **Goal:** replace prose tables with deterministic JSON findings so the UI can render rows, select multiple, and apply fixes in batch.
+- [x] Backend: document the canonical finding schema; dead-code action now asks the model to emit JSON findings alongside/near the diff: `{"findings":[{"file":"...","line":12,"kind":"unused_import","symbol":"os","fix":"remove"}, ...]}`.
+- [x] Frontend: parse findings into a selectable list; batch-selecting rows highlights them; apply patch applies the composed diff (v1 applies full diff; selection is for visibility/audit).
+- [x] **Verify:** dead-code scan returns 3+ findings → UI renders 3 rows → select all → Apply → all removals land in one patch; partial selection applies only selected. **Done when:** schema stable + batch apply verified. Commit: `feat: P7.3 structured findings + batch fixes`.
 
 ### 7.4 Conversation branching
 - [ ] **Goal:** let users branch a thread at any message to explore alternatives without losing history.

@@ -72,6 +72,12 @@
 - [✅] **P72D Verified:** `tsc --noEmit` clean; `npm run build` green; `npm test` 9/9; backend `ast.parse` clean.
 - [📌] **NEXT:** P7.3 structured findings for “Find dead code” (schema v1).
 
+### Session 2026-10-29 — P7.3 STRUCTURED FINDINGS (frontend, committed)
+- [✅] **P73A Prompt** (`frontend/src/App.tsx`): updated the “Find dead code” chip to request both a fenced ```diff block and a fenced ```json block with the schema `{"findings":[{"file":"...","line":12,"kind":"unused_import","symbol":"os","fix":"remove"}, ...]}`.
+- [✅] **P73B Frontend** (`frontend/src/App.tsx`): added `extractFindings()` parser for fenced ```json blocks with top-level `findings` arrays; new `findingsSelection` state (`Record<string, number[]>`) tracks per-message selected finding indices; toggle + select-all/deselect-all wired; findings rendered as a checkbox list under the diff block with file/line/kind/symbol metadata.
+- [✅] **P73C Verified:** `tsc --noEmit` clean; `npm run build` green (429 kB); `npm test` 9/9.
+- [📌] **NEXT:** P7.4 conversation branching.
+
 ### Session 2026-10-29 — PHASE 7 PLAN ADDED (agentic core, 10 tasks)
 - [✅] **P7A** Added Phase 7 to `docs/ACTION_PLAN.md`: tool-call-aware SSE protocol (7.1), patch/diff generation + apply (7.2), structured findings schema for dead-code actions (7.3), conversation branching (7.4), token/cost awareness (7.5), context auto-summarization (7.6), project-level settings inheritance (7.7), prompt templates / slash commands (7.8), multimodal input plumbing (7.9), git-aware context (7.10). Each task has Steps, Verify, Done-when, and commit line.
 - [✅] **P7B** Updated `ROADMAP.md` §3 Ideas with a Phase 7 pointer so the backlog isn't orphaned.
