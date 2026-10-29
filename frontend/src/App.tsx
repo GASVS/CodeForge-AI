@@ -166,6 +166,35 @@ function App() {
     inputRef.current?.focus();
   };
 
+  // P7.9 multimodal input: pending image URLs attached to the next message
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+
+  const uploadImages = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    const allowed = list.filter(f => {
+      const ext = f.name.split('.').pop()?.toLowerCase() || '';
+      return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+    });
+    if (allowed.length === 0) return;
+    const fd = new FormData();
+    allowed.forEach(f => fd.append('files', f));
+    try {
+      const res = await fetch(`${API_URL}/api/upload`, { method: 'POST', body: fd });
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      const urls = (data.files || [])
+        .filter((f: any) => f.url)
+        .map((f: any) => f.url);
+      setPendingImages(prev => [...prev, ...urls]);
+    } catch (e) {
+      console.error('Image upload failed:', e);
+    }
+  };
+
+  const removePendingImage = (url: string) => {
+    setPendingImages(prev => prev.filter(u => u !== url));
+  };
+
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
   useEffect(() => {
@@ -464,6 +493,7 @@ function App() {
     setInput('');
     setIsLoading(true);
     setStreamStarted(false);
+    setPendingImages([]);
 
     const assistantMsgId = (Date.now() + 1).toString();
     const assistantMsg: Message = {
@@ -584,6 +614,10 @@ function App() {
       if (historyForApi.length > 0) {
         params.set('messages', JSON.stringify(historyForApi));
       }
+      // P7.9: send pending image URLs for multimodal input
+      if (pendingImages.length > 0) {
+        params.set('image_urls', pendingImages.join(','));
+      }
       // P3.2: RAG mode active → backend picks the top relevant chunks of the
       // imported project for this question (file_ids still ride along as an
       // explicit selection, but the RAG prefix does the grounding).
@@ -601,6 +635,16 @@ function App() {
         try {
           const data = JSON.parse(event.data);
           const type = data.type || 'text';
+
+          if (type === 'image') {
+            // P7.9: render attached images as part of the message
+            setMessages(prev => prev.map(msg =>
+              msg.id === assistantMsgId
+                ? { ...msg, image_urls: (msg as any).image_urls ? (msg as any).image_urls.concat(data.urls) : data.urls }
+                : msg
+            ));
+            return;
+          }
 
           if (type === 'text' && data.text) {
             if (!streamStarted) {
@@ -1179,6 +1223,14 @@ function App() {
                         >
                           {msg.content}
                         </ReactMarkdown>
+                        {/* P7.9: render attached images */}
+                        {(msg as any).image_urls && (msg as any).image_urls.length > 0 && (
+                          <div className="mt-3 flex gap-2 flex-wrap">
+                            {(msg as any).image_urls.map((url: string) => (
+                              <img key={url} src={`${API_URL}${url}`} alt="" className="max-h-64 rounded-lg border border-gray-300 dark:border-slate-700 object-contain" />
+                            ))}
+                          </div>
+                        )}
                         {/* P7.1 tool-call cards */}
                         {msg.toolCalls && msg.toolCalls.length > 0 && (
                           <div className="mt-3 space-y-2">
@@ -1473,6 +1525,21 @@ function App() {
                 el.style.height = 'auto';
                 el.style.height = Math.min(el.scrollHeight, 200) + 'px';
               }}
+              onPaste={async (e) => {
+                const items = Array.from(e.clipboardData?.items || []);
+                const imageItems = items.filter(it => it.type.startsWith('image/'));
+                if (imageItems.length > 0) {
+                  e.preventDefault();
+                  await uploadImages(imageItems.map(it => it.getAsFile()).filter(Boolean) as File[]);
+                }
+              }}
+              onDragOver={(e) => { e.preventDefault(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files.length > 0) {
+                  uploadImages(e.dataTransfer.files);
+                }
+              }}
               onKeyDown={(e) => {
                 // Enter = send, Shift+Enter = newline (Phase 4.2)
                 if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
@@ -1495,6 +1562,20 @@ function App() {
               disabled={isLoading}
               className={`flex-1 min-w-0 resize-none ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'} border rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 transition-colors`}
             />
+            {pendingImages.length > 0 && (
+              <div className="flex gap-2 px-4 pt-2 flex-wrap">
+                {pendingImages.map(url => (
+                  <div key={url} className="relative inline-block">
+                    <img src={`${API_URL}${url}`} alt="" className="h-16 rounded-lg border border-gray-300 dark:border-slate-700 object-cover" />
+                    <button
+                      onClick={() => removePendingImage(url)}
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-gray-800 text-white rounded-full text-xs flex items-center justify-center"
+                      title="Remove"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {isLoading ? (
               <button
@@ -1515,6 +1596,25 @@ function App() {
                 <SendIcon />
               </button>
             )}
+            <label className="shrink-0 p-3 bg-gray-200 dark:bg-slate-800 hover:bg-gray-300 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center justify-center min-w-[48px] cursor-pointer" title="Attach image">
+              <input
+                type="file"
+                accept="image/png,image/jpg,image/jpeg,image/gif,image/webp,image/svg+xml"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) {
+                    uploadImages(e.target.files);
+                    e.target.value = '';
+                  }
+                }}
+              />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </label>
           </div>
         </div>
       </div>

@@ -9,7 +9,8 @@ Week 1 MVP endpoints:
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
 import os
@@ -96,6 +97,8 @@ ALLOWED_EXTENSIONS = {
     "cs", "php", "sh", "bash", "zsh", "ps1",
     "html", "css", "scss", "vue", "svelte",
     "json", "yml", "yaml", "toml", "xml", "sql", "md", "txt", "csv", "ini", "env",
+    # P7.9 multimodal input: allow image attachments (plumbing only, no model change yet)
+    "png", "jpg", "jpeg", "gif", "webp", "svg",
 }
 
 
@@ -191,6 +194,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# P7.9: serve uploaded images/files under /uploads/
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+
 
 # Request/Response models
 class ChatRequest(BaseModel):
@@ -199,6 +206,8 @@ class ChatRequest(BaseModel):
     stream: bool = True
     context_files: Optional[List[str]] = None  # List of uploaded file IDs
     project_ids: Optional[List[str]] = None    # Imported projects → RAG context
+    # P7.9 multimodal input: optional image URLs attached to the next message
+    image_urls: Optional[List[str]] = None
 
 
 # In-memory storage for uploaded files (in production, use database)
@@ -207,10 +216,10 @@ uploaded_files_store: dict = {}
 
 @app.post("/api/upload")
 async def upload_file(files: List[UploadFile] = File(...)):
-    """Upload code files for analysis. Returns file IDs that can be referenced in chat.
+    """Upload code files or images for analysis/context.
 
-    Enforces: ≤10 files/request, ≤2 MB/file (413), code/text extension (415),
-    text sniff (415), sanitized basename (no path traversal).
+    Returns file IDs that can be referenced in chat. Images are served
+    back as `/uploads/{filename}` URLs (P7.9 multimodal plumbing).
     """
     if len(files) > MAX_FILES_PER_REQUEST:
         raise HTTPException(
@@ -224,8 +233,11 @@ async def upload_file(files: List[UploadFile] = File(...)):
         if safe_name is None:
             raise HTTPException(
                 status_code=415,
-                detail=f"Unsupported file type: {file.filename!r} (code/text files only)",
+                detail=f"Unsupported file type: {file.filename!r}",
             )
+
+        ext = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+        is_image = ext in {"png", "jpg", "jpeg", "gif", "webp", "svg"}
 
         file_id = str(uuid.uuid4())[:8]
         file_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
@@ -257,30 +269,46 @@ async def upload_file(files: List[UploadFile] = File(...)):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to upload {safe_name}: {e}")
 
-        if first_chunk is not None and _looks_binary(first_chunk):
+        content = b"".join(chunks)
+
+        # P7.9: images are binary by nature — skip the text-sniff check for them
+        if not is_image and first_chunk is not None and _looks_binary(first_chunk):
             raise HTTPException(
                 status_code=415,
                 detail=f"{safe_name} looks binary — only text/code files are supported",
             )
 
-        content = b"".join(chunks)
-        text_content = content.decode("utf-8", errors="ignore")
         with open(file_path, "wb") as f:
             f.write(content)
 
-        # Persist to SQLite (source of truth; survives restart) and cache in memory
-        database.upload_add(file_id, safe_name, text_content, total)
-        uploaded_files_store[file_id] = {
-            "filename": safe_name,
-            "path": file_path,
-            "size": total,
-            "content": text_content,
-            "created_at": time.time(),
-        }
-
-        uploaded_files.append(
-            {"id": file_id, "filename": safe_name, "size": total}
-        )
+        if is_image:
+            # P7.9: images are not stored in SQLite (plumbing only); serve statically
+            url = f"/uploads/{file_id}_{safe_name}"
+            uploaded_files_store[file_id] = {
+                "filename": safe_name,
+                "path": file_path,
+                "size": total,
+                "content": "",
+                "created_at": time.time(),
+                "is_image": True,
+                "url": url,
+            }
+            uploaded_files.append(
+                {"id": file_id, "filename": safe_name, "size": total, "url": url}
+            )
+        else:
+            text_content = content.decode("utf-8", errors="ignore")
+            database.upload_add(file_id, safe_name, text_content, total)
+            uploaded_files_store[file_id] = {
+                "filename": safe_name,
+                "path": file_path,
+                "size": total,
+                "content": text_content,
+                "created_at": time.time(),
+            }
+            uploaded_files.append(
+                {"id": file_id, "filename": safe_name, "size": total}
+            )
 
     return {"files": uploaded_files}
 
@@ -1187,7 +1215,10 @@ async def chat(request: ChatRequest):
         else:
             response = await call_openrouter(enhanced_message)
         
-        return {"type": "text", "content": response}
+        result = {"type": "text", "content": response}
+        if request.image_urls:
+            result["image_urls"] = request.image_urls
+        return result
     
     except httpx.ConnectError:
         raise HTTPException(
@@ -1418,6 +1449,21 @@ async def stream_ollama(
             yield "data: [DONE]\n\n"
 
 
+async def _stream_with_images(
+    messages: list[dict],
+    model_name: str,
+    tools: list[dict] | None = None,
+    max_tool_rounds: int = 5,
+    project_id: str | None = None,
+    image_urls: list[str] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Wrap `stream_ollama` and prepend an `image` SSE frame when URLs are present."""
+    if image_urls:
+        yield f"data: {json.dumps({'type': 'image', 'urls': image_urls})}\n\n"
+    async for frame in stream_ollama(messages, model_name, tools=tools, max_tool_rounds=max_tool_rounds, project_id=project_id):
+        yield frame
+
+
 @app.get("/stream/api/chat")
 async def stream_chat(
     message: str,
@@ -1425,6 +1471,8 @@ async def stream_chat(
     file_ids: Optional[str] = None,
     project_ids: Optional[str] = None,
     messages: Optional[str] = None,
+    # P7.9 multimodal input: optional image URLs attached to the next message
+    image_urls: Optional[str] = None,
 ):
     """
     Stream API endpoint using Server-Sent Events (SSE).
@@ -1437,6 +1485,7 @@ async def stream_chat(
       message is RAG-augmented (top relevant chunks from those projects)
     - messages: JSON array of previous {role, content} turns (optional; enables
       multi-turn + tool-call rounds)
+    - image_urls: Comma-separated image URLs to attach (P7.9 plumbing)
 
     Returns real-time tokens as they're generated by the LLM.
     Frontend receives typed events and appends to display progressively.
@@ -1488,8 +1537,11 @@ async def stream_chat(
         for t in TOOL_REGISTRY.values()
     ]
 
+    # P7.9: parse optional image URLs from query param
+    image_url_list = [u.strip() for u in (image_urls or "").split(",") if u.strip()]
+
     return StreamingResponse(
-        stream_ollama(api_messages, model_name, tools=tools or None, project_id=first_project_id),
+        _stream_with_images(api_messages, model_name, tools=tools or None, project_id=first_project_id, image_urls=image_url_list),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

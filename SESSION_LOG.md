@@ -106,7 +106,12 @@
 - [✅] **P78A Backend** (`src/backend/database.py` + `src/backend/main.py`): added `skills` table + CRUD helpers (`skill_create`, `skill_get`, `skill_list`); `GET /api/skills`, `GET /api/skills/{name}`, `POST /api/skills` endpoints.
 - [✅] **P78B Frontend** (`frontend/src/App.tsx`): added `skills` state, `loadSkills()`, `insertSkill()`, `showSkillPalette` dropdown in the input bar, and slash command expansion (`/name` + Enter inserts template body).
 - [✅] **P78C Verified:** `tsc --noEmit` clean; `npm run build` green (435 kB); `npm test` 9/9; backend `ast.parse` clean.
-- [📌] **NEXT:** P7.9 multimodal input plumbing.
+- [📌] **NEXT:** P7.10 git-aware context.
+
+### Session 2026-10-29 — P7.9 MULTIMODAL INPUT PLUMBING (backend + frontend)
+- [✅] **P79A Backend** (`src/backend/main.py`): added `FileResponse` + `StaticFiles` imports; mounted `/uploads/` directory for static image serving; extended `ALLOWED_EXTENSIONS` to include png/jpg/jpeg/gif/webp/svg; modified `/api/upload` to accept images, save raw bytes (skip text sniff), return `/uploads/{file_id}_{name}` URLs, and track in `uploaded_files_store`; added `image_urls: Optional[List[str]]` to `ChatRequest`; `stream_chat` parses `image_urls` query param and emits `image` SSE frame via `_stream_with_images` helper before `stream_ollama`; non-streaming `/api/chat` echoes `image_urls` in response.
+- [✅] **P79B Frontend** (`frontend/src/App.tsx`): added `pendingImages` state + `uploadImages()` + `removePendingImage()`; paperclip upload button in input bar; paste handler intercepts image clips; drag/drop handler on textarea; pending image thumbnails with remove (×) buttons; `image_urls` included in SSE stream params; `image` SSE frame handler appends URLs to assistant message; images rendered in message bubbles; `pendingImages` cleared on send.
+- [✅] **P79C Verified:** `tsc --noEmit` clean; `npm run build` green (438 kB); `npm test` 9/9; backend `ast.parse` clean. **Live:** uvicorn on :8001 → `POST /api/upload` with PNG → 200 with `url: /uploads/4a9c5cb2_test.png` → `GET /uploads/4a9c5cb2_test.png` → 200 `image/png`; `stream/api/chat?message=...&image_urls=/uploads/...` → SSE stream emits `image` frame with URLs before text.
 
 ### Session 2026-10-29 — PHASE 7 PLAN ADDED (agentic core, 10 tasks)
 - [✅] **P7A** Added Phase 7 to `docs/ACTION_PLAN.md`: tool-call-aware SSE protocol (7.1), patch/diff generation + apply (7.2), structured findings schema for dead-code actions (7.3), conversation branching (7.4), token/cost awareness (7.5), context auto-summarization (7.6), project-level settings inheritance (7.7), prompt templates / slash commands (7.8), multimodal input plumbing (7.9), git-aware context (7.10). Each task has Steps, Verify, Done-when, and commit line.

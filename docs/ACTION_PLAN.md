@@ -268,11 +268,11 @@
 - [x] **Verify:** `npm run build` green (435 kB); `npm test` 9/9; backend `ast.parse` clean. **Done when:** templates load, palette works, slash commands expand. Commit: `feat: P7.8 prompt templates + slash commands`.
 
 ### 7.9 Multimodal input enablement (planning, not shipping images yet)
-- [ ] **Goal:** keep the schema/image flow compatible with future vision models without shipping them now.
-- [ ] Backend: `POST /api/upload` allow-list already accepts images; store image mime/size metadata; no model change yet.
-- [ ] Chat schema: `ChatRequest` gains optional `image_urls: List[str]`; SSE frame schema already supports an `image` frame type if we want to stream vision later.
-- [ ] Frontend: paste/drag images into the input → uploads to `/api/upload` → attaches to next message as `image_urls`. Hide behind a flag so it doesn’t break v1.
-- [ ] **Verify:** attach a PNG → chat request includes `image_urls` → server accepts → stored with message metadata; no model call yet. **Done when:** plumbing accepted end-to-end. Commit: `feat: P7.9 multimodal input plumbing`.
+- [x] **Goal:** keep the schema/image flow compatible with future vision models without shipping them now.
+- [x] Backend: `POST /api/upload` allow-list accepts images; store image metadata; serve via `StaticFiles` mount at `/uploads/`; `image_urls` returned in response.
+- [x] Chat schema: `ChatRequest` gains optional `image_urls: List[str]`; `stream_chat` parses `image_urls` query param and emits `image` SSE frame before text.
+- [x] Frontend: paste/drag images into the input → uploads to `/api/upload` → attaches to next message as `image_urls`. Paperclip button + thumbnail preview with remove.
+- [x] **Verify:** attach a PNG → chat request includes `image_urls` → server accepts → image served at `/uploads/...` → SSE stream emits `image` frame. **Done when:** plumbing accepted end-to-end. Commit: `feat: P7.9 multimodal input plumbing`.
 
 ### 7.10 Git-aware context (lightweight)
 - [ ] **Goal:** let the model answer “what did I change?” and make patches safer.
