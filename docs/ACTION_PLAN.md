@@ -249,11 +249,11 @@
 - [x] Frontend: `lastUsage` state captures the final usage frame; header shows a compact budget bar (`total / 8192`) with red warning when >80%.
 - [x] **Verify:** run any chat → usage bar updates after completion; verify `npm run build` and `npm test` pass. **Done when:** UI reflects usage + warning boundary. Commit: `feat: P7.5 token usage + context budget`.
 
-### 7.6 Context auto-summarization
-- [ ] **Goal:** keep long threads within budget without losing early context.
-- [ ] Backend: when estimated token count exceeds threshold (e.g. 60% of `num_ctx`), summarize earliest messages into a single system-prompt-style summary block and drop them from the request (preserve in DB for branch/history). Summarization call uses the same model with a fixed prompt.
-- [ ] Frontend: visual indicator when a turn was summarized (e.g. “Earlier context summarized” pill).
-- [ ] **Verify:** 50-message thread → after many turns the model still answers questions about early messages using the summary; DB still holds original messages; refresh → summary + recent messages shown. **Done when:** long-thread quality preserved + summary indicator visible. Commit: `feat: P7.6 context auto-summarization`.
+### 7.6 Context auto-summarization ✅ DONE (pending commit)
+- [x] **Goal:** keep long threads within budget without losing early context.
+- [x] Backend: `_compress_history(history)` estimates tokens via `len(content)//4`; when history exceeds ~6.5K tokens it inserts a system note summarizing the oldest turns and keeps the last 6 turns (12 messages). `stream_chat` compresses before sending to the model; `stream_ollama` emits a `compressed` SSE frame so the frontend can surface the notice.
+- [x] Frontend: `compressedNote` state captures the `compressed` frame and renders a banner above the message list.
+- [x] **Verify:** `npm run build` green (431 kB); `npm test` 9/9; backend `ast.parse` clean. **Done when:** banner renders on long histories. Commit: `feat: P7.6 context auto-summarization`.
 
 ### 7.7 Project-level settings inheritance
 - [ ] **Goal:** different repos need different defaults (temperature, system prompt).

@@ -148,6 +148,8 @@ function App() {
   const [findingsSelection, setFindingsSelection] = useState<Record<string, number[]>>({});
   // P7.5 token usage from the last completed stream
   const [lastUsage, setLastUsage] = useState<{ prompt_tokens: number; completion_tokens: number; total_tokens: number } | null>(null);
+  // P7.6 context compression notice from the stream
+  const [compressedNote, setCompressedNote] = useState<string | null>(null);
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -588,6 +590,8 @@ function App() {
             armWatchdog();
             fullContent += data.text;
             setContent(fullContent);
+          } else if (type === 'compressed' && data.note) {
+            setCompressedNote(data.note);
           } else if (type === 'usage' && data.usage) {
             setLastUsage(data.usage);
           } else if (type === 'tool_call') {
@@ -1088,6 +1092,12 @@ function App() {
           </div>
         ) : (
           <div className="flex flex-col gap-4 max-h-[60vh] overflow-y-auto pr-2 mb-4 w-full">
+            {/* P7.6 context compression banner */}
+            {compressedNote && (
+              <div className={`p-3 rounded-lg border text-xs ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-white border-gray-200 text-gray-700'}`}>
+                {compressedNote}
+              </div>
+            )}
             {messages.map((msg, i) => {
               const isAssistant = msg.role === 'assistant';
               return (

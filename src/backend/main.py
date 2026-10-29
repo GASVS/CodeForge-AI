@@ -1158,6 +1158,44 @@ def register_tool(name: str, description: str, parameters: dict, handler):
         "handler": handler,
     }
 
+async def _estimate_tokens(text: str) -> int:
+    return max(len(text), 1) // 4
+
+
+_MAX_HISTORY_TOKENS = 6554
+_KEEP_LAST_N_TURNS = 6
+
+
+def _compress_history(history: list[dict]) -> tuple[list[dict], bool]:
+    """Optionally summarize the oldest turns when history is over budget.
+
+    Returns the possibly-compressed message list plus a ``compressed`` flag.
+    Compression is currently a best-effort system note: it keeps the last
+    ``_KEEP_LAST_N_TURNS`` turns and records that earlier context was dropped.
+    """
+    if not history:
+        return history, False
+
+    total = sum(_estimate_tokens((m.get("content") or "")) for m in history)
+    if total <= _MAX_HISTORY_TOKENS:
+        return history, False
+
+    # Keep the most recent N turns; everything older is summarized.
+    keep = history[-_KEEP_LAST_N_TURNS * 2:]
+    dropped = history[: len(history) - len(keep)]
+    if not dropped:
+        return history, False
+
+    topics = "; ".join(
+        ((m.get("content") or "").split("\n")[0].strip()[:120] for m in dropped if m.get("content"))
+    )
+    summary = (
+        f"[Earlier conversation compressed to stay within context limits. "
+        f"Topics covered: {topics}. Some details from the beginning of this thread may be missing.]"
+    )
+    return [{"role": "system", "content": summary}] + keep, True
+
+
 async def _execute_tool_call(tool_call: dict) -> dict:
     name = tool_call.get("function", {}).get("name", "")
     args = tool_call.get("function", {}).get("arguments", {})
@@ -1190,6 +1228,9 @@ async def stream_ollama(
     emitted_done = False
     prompt_tokens = sum(len(json.dumps(m)) // 4 for m in messages)
     try:
+        # P7.6: if history was auto-compressed, surface that to the frontend
+        if messages and messages[0].get("role") == "system" and "compressed" in (messages[0].get("content") or ""):
+            yield f"data: {json.dumps({'type': 'compressed', 'note': messages[0].get('content', '')})}\n\n"
         async with httpx.AsyncClient(timeout=120.0) as client:
             payload = {
                 "model": model_name,
@@ -1299,14 +1340,19 @@ async def stream_chat(
     api_messages: list[dict] = [{"role": "system", "content": _system_prompt()}]
 
     # Previous conversation history (if provided)
+    history: list[dict] = []
     if messages:
         try:
-            history = json.loads(messages)
-            for m in history:
+            raw = json.loads(messages)
+            for m in raw:
                 if m.get("role") in ("user", "assistant"):
-                    api_messages.append({"role": m["role"], "content": m.get("content", "") or ""})
+                    history.append({"role": m["role"], "content": m.get("content", "") or ""})
         except json.JSONDecodeError:
             pass
+
+    # P7.6: auto-compress history when it exceeds the token budget.
+    compressed, was_compressed = _compress_history(history)
+    api_messages.extend(compressed)
 
     # Classic flow: selected uploaded/project files concatenated into the prompt.
     ids = [fid.strip() for fid in file_ids.split(",") if fid.strip()] if file_ids else None
