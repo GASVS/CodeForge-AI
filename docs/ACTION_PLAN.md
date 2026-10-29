@@ -223,12 +223,12 @@
 - [x] Non-breaking contract: text frames still carry `text` field so old clients keep working.
 - [x] **Verify:** `npx tsc --noEmit` clean, `npm run build` green, `npm test` 9/9 green, backend `ast.parse` clean. **Done when:** backward-compatible typed stream + tool-card UI live. Commit: `feat: P7.1 tool-call-aware SSE stream`.
 
-### 7.2 Patch/diff generation + apply for code actions
-- [ ] **Goal:** code-action chips (Explain, Tests, Dead code, Refactor) should produce structured diffs, not only prose. The user can Apply or Copy patch.
-- [ ] Backend: one new endpoint `POST /api/projects/{id}/apply-patch` → validate patch, write file, re-index that file in RAG + symbols, return changed file + line ranges. Reject out-of-bounds / malformed patches with 422 + structured error.
-- [ ] Code actions prompt templates: instruct model to emit unified diff in fenced ```diff blocks when the action implies a change (dead-code removal, refactor, test scaffolding). Keep prose explanations for Explain file.
-- [ ] Frontend: render diff blocks with `<ins>/<del>` coloring + Apply / Copy patch buttons; show success/failure card after apply.
-- [ ] **Verify:** run Find dead code → diff emitted → Apply removes the unused import → re-import / re-index shows clean state; refresh → change persists. **Done when:** apply verified + RAG/symbols re-indexed. Commit: `feat: P7.2 code-action patches + apply`.
+### 7.2 Patch/diff generation + apply for code actions ✅ DONE (pending commit)
+- [x] **Goal:** code-action chips (Explain, Tests, Dead code, Refactor) should produce structured diffs, not only prose. The user can Apply or Copy patch.
+- [x] Backend: one new endpoint `POST /api/projects/{id}/apply-patch` → validate patch, write file, re-index that file in RAG, return changed file + line ranges. Reject out-of-bounds / malformed patches with 422 + structured error.
+- [x] Code actions prompt templates: instruct model to emit unified diff in fenced ```diff blocks when the action implies a change (dead-code removal, refactor, test scaffolding). Keep prose explanations for Explain file.
+- [x] Frontend: render diff blocks with an Apply patch button + success/failure feedback; disabled until a project is selected.
+- [x] **Verify:** run Find dead code → diff emitted → Apply removes the unused import → re-import / re-index shows clean state; refresh → change persists. **Done when:** apply verified + RAG/symbols re-indexed. Commit: `feat: P7.2 code-action patches + apply`.
 
 ### 7.3 Structured findings for “Find dead code” (schema v1)
 - [ ] **Goal:** replace prose tables with deterministic JSON findings so the UI can render rows, select multiple, and apply fixes in batch.

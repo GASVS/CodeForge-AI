@@ -410,6 +410,20 @@ def project_file_get_by_path(project_id: str, path: str) -> dict | None:
     return dict(row) if row else None
 
 
+def project_file_update(file_id: str, content: str) -> dict | None:
+    """Update a project file's content and refresh its size/line_count."""
+    size = len(content.encode("utf-8"))
+    line_count = len(content.splitlines())
+    with _lock:
+        cur = get_db().execute(
+            "UPDATE project_files SET content=?, size=?, line_count=? WHERE id=?",
+            (content, size, line_count, file_id))
+        if cur.rowcount == 0:
+            return None
+        get_db().commit()
+    return {"id": file_id, "size": size, "line_count": line_count}
+
+
 # --- Phase 3: settings (key/value) ------------------------------------------
 
 DEFAULT_SYSTEM_PROMPT = (

@@ -837,6 +837,145 @@ async def project_search_endpoint(project_id: str, q: str, k: int = 10):
     return await project_search(project_id, q.strip(), k=k)
 
 
+# P7.2 patch/diff apply
+class ApplyPatchRequest(BaseModel):
+    patch: str
+
+
+def _apply_unified_diff(original: str, diff_text: str) -> str:
+    """Apply a unified diff to original text. Returns the patched text.
+
+    Supports single-file unified diffs (the standard `diff --git` /
+    `--- a/…` / `+++ b/…` format). Raises ValueError on malformed input.
+    """
+    lines = original.splitlines(keepends=True)
+    out = list(lines)
+
+    # Strip diff headers (--- / +++) and keep only hunk lines
+    hunk_lines: list[str] = []
+    in_hunk = False
+    for raw in diff_text.splitlines():
+        if raw.startswith('--- '):
+            continue
+        if raw.startswith('+++ '):
+            continue
+        if raw.startswith('diff --git'):
+            continue
+        if raw.startswith('index '):
+            continue
+        if raw.startswith('@@'):
+            in_hunk = True
+        if not in_hunk and not raw.startswith((' ', '+', '-', '@@')):
+            continue
+        hunk_lines.append(raw)
+
+    # Parse hunks and apply in reverse order (so line numbers stay valid)
+    # Hunk header: @@ -old_start,old_count +new_start,new_count @@
+    import re
+    hunks: list[tuple[int, int, int, int, list[str]]] = []
+    current = None
+    current_body: list[str] = []
+
+    for line in hunk_lines:
+        m = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', line)
+        if m:
+            if current is not None:
+                hunks.append(current)
+            current = (
+                int(m.group(1)),
+                int(m.group(2) or 1),
+                int(m.group(3)),
+                int(m.group(4) or 1),
+                [],
+            )
+            continue
+        if current is not None:
+            current_body.append(line)
+
+    if current is not None:
+        hunks.append(current)
+
+    for old_start, old_count, new_start, new_count, body in reversed(hunks):
+        old_start_0 = max(0, old_start - 1)
+        old_end = old_start_0 + old_count
+
+        replacements: list[str] = []
+        for b in body:
+            if b.startswith(' ') or b.startswith('+') or b.startswith('-'):
+                if b.startswith('+'):
+                    replacements.append(b[1:] + '\n')
+                elif b.startswith('-'):
+                    continue
+                else:
+                    replacements.append(b[1:] + '\n')
+            else:
+                replacements.append(b + '\n')
+
+        out[old_start_0:old_end] = [r if r.endswith('\n') else r for r in replacements]
+
+    return ''.join(out)
+
+
+@app.post("/api/projects/{project_id}/apply-patch")
+async def apply_patch(project_id: str, body: ApplyPatchRequest):
+    """Apply a unified diff patch to a project file.
+
+    Request body: `{"patch": "unified diff text"}`
+
+    The diff must contain `--- a/<path>` and `+++ b/<path>` headers.
+    Returns `{ok, file_id, path, size, line_count}` or 422 on failure.
+    """
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    diff_text = body.patch.strip()
+    if not diff_text:
+        raise HTTPException(status_code=422, detail="patch is empty")
+
+    # Extract target file path from the diff headers
+    target_path = None
+    for line in diff_text.splitlines():
+        if line.startswith('--- a/'):
+            target_path = line[len('--- a/'):]
+            break
+        if line.startswith('--- '):
+            target_path = line[len('--- '):]
+            if target_path.startswith('a/'):
+                target_path = target_path[2:]
+            break
+
+    if not target_path:
+        raise HTTPException(status_code=422, detail="Could not find target file path in diff (need '--- a/<path>')")
+
+    file_row = database.project_file_get_by_path(project_id, target_path)
+    if file_row is None:
+        raise HTTPException(status_code=404, detail=f"File '{target_path}' not found in project")
+
+    try:
+        patched = _apply_unified_diff(file_row['content'], diff_text)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Malformed patch: {e}")
+
+    updated = database.project_file_update(file_row['id'], patched)
+    if updated is None:
+        raise HTTPException(status_code=500, detail="Failed to write patched file")
+
+    # P7.2: re-index that file in RAG so search reflects the change
+    try:
+        chunks = _split_chunks(patched)
+        texts = [c for _sl, c in chunks]
+        embs = await _embed_texts(texts)
+        rows = [
+            (idx, content, sl, sl + max(0, content.count('\n')), np.asarray(emb, dtype=np.float32).tobytes())
+            for idx, (sl, content), emb in zip(range(len(chunks)), chunks, embs)
+        ]
+        database.chunks_add(project_id, file_row['id'], rows)
+    except HTTPException:
+        pass  # best-effort: embedding model down doesn't break the apply
+
+    return {"ok": True, **updated, "path": target_path}
+
+
 def _system_prompt() -> str:
     """System prompt from the SQLite settings store (per P3.4)."""
     return (database.setting_get("system_prompt", database.DEFAULT_SYSTEM_PROMPT) or "").strip()

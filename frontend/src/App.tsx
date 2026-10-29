@@ -141,6 +141,9 @@ function App() {
   // Phase 4.2: the box is now a (1-line) auto-growing textarea so
   // Shift+Enter inserts a real newline — Enter alone still sends.
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // P7.2 patch apply UI state
+  const [patchApplyingId, setPatchApplyingId] = useState<string | null>(null);
+  const [patchFeedback, setPatchFeedback] = useState<Record<string, { ok: boolean; message: string }>>({});
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -350,6 +353,35 @@ function App() {
     if (!userMsg || !assistantMsg || assistantMsg.role !== 'assistant') return;
     setMessages(prev => prev.filter(m => m.id !== userMsg.id && m.id !== assistantMsg.id));
     sendMessage(userMsg.content);
+  };
+
+  // P7.2: apply a unified diff block from an assistant message to the backend
+  const applyPatch = async (diffText: string, blockId: string) => {
+    setPatchApplyingId(blockId);
+    setPatchFeedback(prev => ({ ...prev, [blockId]: { ok: false, message: 'Applying…' } }));
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${ragProjectId}/apply-patch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patch: diffText }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data && data.detail ? data.detail : `HTTP ${res.status}`);
+      }
+      setPatchFeedback(prev => ({ ...prev, [blockId]: { ok: true, message: data.path ? `Patched ${data.path}` : 'Patch applied' } }));
+    } catch (e: any) {
+      setPatchFeedback(prev => ({ ...prev, [blockId]: { ok: false, message: e?.message || 'Failed to apply patch' } }));
+    } finally {
+      setPatchApplyingId(null);
+      setTimeout(() => {
+        setPatchFeedback(prev => {
+          const next = { ...prev };
+          delete next[blockId];
+          return next;
+        });
+      }, 4000);
+    }
   };
 
   const sendMessage = async (content: string) => {
@@ -627,7 +659,8 @@ function App() {
         'List: (1) unused imports, (2) functions/variables/classes that are ' +
         'never referenced, and (3) unreachable or redundant branches. ' +
         'For each item give the file, line (if identifiable), and why it is ' +
-        'likely dead. Then suggest the minimal safe removal for each. ' +
+        'likely dead. Then emit a unified diff in a fenced ```diff block that ' +
+        'removes the dead code. Keep the diff minimal and safe. ' +
         'If no code is attached, ask me which file(s) to use.',
     },
   ];
@@ -652,8 +685,8 @@ function App() {
       'Refactor the attached code to: ' +
       (target.trim() || 'follow clean, conventional best practices') +
       '. Keep the public behavior identical. ' +
-      'Return the full refactored code in a code block per file, then a short ' +
-      'list of the specific changes you made and why. ' +
+      'Emit a unified diff in a fenced ```diff block with the changes, ' +
+      'plus a short explanation of what changed and why. ' +
       'If no code is attached, ask me which file to use.';
     setInput(text);
     requestAnimationFrame(() => {
@@ -671,6 +704,19 @@ function App() {
   // renders as a normal bubble (unchanged behavior).
   const isWelcome = messages.length === 1 &&
     (messages[0].id === 'welcome' || messages[0].id.startsWith('welcome-'));
+
+  // P7.2: extract fenced ```diff blocks from assistant content
+  const extractDiffBlocks = (content: string) => {
+    const regex = /```diff\n([\s\S]*?)```/g;
+    const blocks: { id: string; text: string }[] = [];
+    let m: RegExpExecArray | null;
+    let idx = 0;
+    while ((m = regex.exec(content)) !== null) {
+      blocks.push({ id: `diff-${idx}`, text: m[1].trim() });
+      idx++;
+    }
+    return blocks;
+  };
 
   // Shared by the code-block copy button and the empty-state "ollama pull"
   // snippet: best-effort clipboard write, and while the app is offline the
@@ -973,6 +1019,11 @@ function App() {
                               const language = match ? match[1] : 'text';
                               const codeText = String(children).replace(/\n$/, '');
                               
+                              // P7.2: diff blocks are rendered below as actionable patch UI
+                              if (!inline && match && language === 'diff') {
+                                return null;
+                              }
+
                               if (!inline && match) {
                                 return (
                                   <div className={`relative my-3 rounded-lg overflow-hidden`}>
@@ -1049,6 +1100,36 @@ function App() {
                             </button>
                           </div>
                         )}
+                        {/* P7.2 actionable diff blocks */}
+                        {(() => {
+                          const blocks = extractDiffBlocks(msg.content || '');
+                          if (blocks.length === 0) return null;
+                          return (
+                            <div className="mt-3 space-y-2">
+                              {blocks.map(block => {
+                                const feedback = patchFeedback[block.id];
+                                const applying = patchApplyingId === block.id;
+                                return (
+                                  <div key={block.id} className={`p-3 rounded-lg border ${theme === 'dark' ? 'bg-slate-950 border-slate-700' : 'bg-gray-50 border-gray-200'}`}>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-xs font-medium opacity-70">Unified diff</span>
+                                      <button
+                                        onClick={() => applyPatch(block.text, block.id)}
+                                        disabled={applying || !ragProjectId}
+                                        className={`shrink-0 px-2 py-1 rounded text-xs font-medium transition-colors ${applying || !ragProjectId ? 'opacity-50 cursor-not-allowed' : theme === 'dark' ? 'bg-indigo-600 hover:bg-indigo-500 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
+                                      >
+                                        {applying ? 'Applying…' : (!ragProjectId ? 'Select project' : 'Apply patch')}
+                                      </button>
+                                    </div>
+                                    {feedback && (
+                                      <div className={`mt-2 text-xs ${feedback.ok ? 'text-emerald-500' : 'text-rose-500'}`}>{feedback.message}</div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap">{msg.content}</div>
