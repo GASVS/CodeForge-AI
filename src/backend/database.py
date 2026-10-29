@@ -69,6 +69,15 @@ def get_db() -> sqlite3.Connection:
                )"""
         )
         _conn.execute(
+            """CREATE TABLE IF NOT EXISTS project_settings (
+                   project_id TEXT NOT NULL,
+                   key TEXT NOT NULL,
+                   value TEXT NOT NULL,
+                   updated_at INTEGER NOT NULL,
+                   PRIMARY KEY (project_id, key)
+               )"""
+        )
+        _conn.execute(
             """CREATE TABLE IF NOT EXISTS project_files (
                    id TEXT PRIMARY KEY,
                    project_id TEXT NOT NULL,
@@ -464,6 +473,34 @@ def settings_all() -> dict:
     for r in rows:
         out[r["key"]] = r["value"]
     return out
+
+
+# --- Phase 7.7: project-level settings overrides ---------------------------
+
+def project_setting_get(project_id: str, key: str, default: str | None = None) -> str | None:
+    with _lock:
+        row = get_db().execute(
+            "SELECT value FROM project_settings WHERE project_id=? AND key=?",
+            (project_id, key)
+        ).fetchone()
+    return row["value"] if row else default
+
+
+def project_setting_set(project_id: str, key: str, value: str) -> None:
+    with _lock:
+        get_db().execute(
+            "INSERT INTO project_settings (project_id, key, value, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(project_id, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (project_id, key, value, _now()))
+        get_db().commit()
+
+
+def project_settings_all(project_id: str) -> dict:
+    with _lock:
+        rows = get_db().execute(
+            "SELECT key, value FROM project_settings WHERE project_id=?", (project_id,)
+        ).fetchall()
+    return {r["key"]: r["value"] for r in rows}
 
 
 # --- Phase 3: embeddings (RAG) ----------------------------------------------

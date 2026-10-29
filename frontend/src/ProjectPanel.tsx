@@ -648,6 +648,18 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
         )}
       </div>
 
+      {/* P7.7: project-level settings */}
+      {active && (
+        <ProjectSettings
+          apiUrl={API_URL}
+          projectId={active.id}
+          theme={theme}
+          onChanged={() => {
+            // No-op — settings are persisted on the backend immediately.
+          }}
+        />
+      )}
+
       {/* File tree */}
       <div className="max-h-64 overflow-y-auto p-2">
         {activeFiles.length === 0 ? (
@@ -668,6 +680,95 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
           })()
         )}
       </div>
+    </div>
+  );
+}
+
+// P7.7: per-project settings overrides (temperature + system prompt)
+function ProjectSettings({ apiUrl, projectId, theme, onChanged }: {
+  apiUrl: string;
+  projectId: string;
+  theme: 'dark' | 'light';
+  onChanged: () => void;
+}) {
+  const [temperature, setTemperature] = useState<string>('0.7');
+  const [systemPrompt, setSystemPrompt] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/settings`);
+      if (!res.ok) throw new Error(res.statusText);
+      const d = await res.json();
+      setTemperature(String(d.temperature ?? 0.7));
+      setSystemPrompt(d.system_prompt || '');
+    } catch (e) {
+      console.error('Failed to load project settings:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [apiUrl, projectId]);
+
+  const save = async (nextTemp: string, nextSp: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ temperature: nextTemp, system_prompt: nextSp }),
+      });
+      if (!res.ok) throw new Error(res.statusText);
+      onChanged();
+    } catch (e) {
+      console.error('Failed to save project settings:', e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={`mx-3 mt-3 p-3 rounded-lg border ${theme === 'dark' ? 'bg-slate-800/40 border-slate-700' : 'bg-white border-gray-200'}`}>
+      <div className="text-xs font-medium opacity-70 mb-2">Project settings (override global defaults)</div>
+      {loading ? (
+        <div className="text-xs opacity-50">Loading…</div>
+      ) : (
+        <div className="space-y-2">
+          <div>
+            <label className="text-xs opacity-70">Temperature</label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="1"
+              value={temperature}
+              onChange={(e) => {
+                setTemperature(e.target.value);
+                void save(e.target.value, systemPrompt);
+              }}
+              className={`w-full text-xs rounded-lg px-2 py-1 border mt-1 ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-gray-300 text-gray-800'}`}
+            />
+          </div>
+          <div>
+            <label className="text-xs opacity-70">System prompt override</label>
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => {
+                setSystemPrompt(e.target.value);
+                void save(temperature, e.target.value);
+              }}
+              rows={3}
+              className={`w-full text-xs rounded-lg px-2 py-1 border mt-1 ${theme === 'dark' ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-white border-gray-300 text-gray-800'}`}
+            />
+          </div>
+          {saving && <div className="text-xs opacity-50">Saving…</div>}
+        </div>
+      )}
     </div>
   );
 }

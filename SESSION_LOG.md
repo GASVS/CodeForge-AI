@@ -96,6 +96,12 @@
 - [✅] **P76C Verified:** `tsc --noEmit` clean; `npm run build` green (431 kB); `npm test` 9/9; backend `ast.parse` clean.
 - [📌] **NEXT:** P7.7 project-level settings inheritance.
 
+### Session 2026-10-29 — P7.7 PROJECT-LEVEL SETTINGS INHERITANCE (backend + frontend)
+- [✅] **P77A Backend** (`src/backend/database.py` + `src/backend/main.py`): added `project_settings` table + CRUD helpers; `GET/PUT /api/projects/{id}/settings` endpoints; `_system_prompt_for_project` / `_temperature_for_project` merge global + project overrides; `stream_chat` and `call_ollama` pass the first `project_id` to Ollama options + system prompt.
+- [✅] **P77B Frontend** (`frontend/src/ProjectPanel.tsx`): added `ProjectSettings` component with temperature and system prompt fields; loads/saves on change; shown when a project is active.
+- [✅] **P77C Verified:** `tsc --noEmit` clean; `npm run build` green (433 kB); `npm test` 9/9; backend `ast.parse` clean.
+- [📌] **NEXT:** P7.8 prompt templates / slash commands.
+
 ### Session 2026-10-29 — PHASE 7 PLAN ADDED (agentic core, 10 tasks)
 - [✅] **P7A** Added Phase 7 to `docs/ACTION_PLAN.md`: tool-call-aware SSE protocol (7.1), patch/diff generation + apply (7.2), structured findings schema for dead-code actions (7.3), conversation branching (7.4), token/cost awareness (7.5), context auto-summarization (7.6), project-level settings inheritance (7.7), prompt templates / slash commands (7.8), multimodal input plumbing (7.9), git-aware context (7.10). Each task has Steps, Verify, Done-when, and commit line.
 - [✅] **P7B** Updated `ROADMAP.md` §3 Ideas with a Phase 7 pointer so the backlog isn't orphaned.

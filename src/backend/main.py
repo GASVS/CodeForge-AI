@@ -992,8 +992,28 @@ def _temperature() -> float:
     return max(0.0, min(1.0, v))
 
 
-def _ollama_options() -> dict:
-    return {"temperature": _temperature(), "num_ctx": 8192}
+def _system_prompt_for_project(project_id: str | None = None) -> str:
+    if not project_id:
+        return _system_prompt()
+    override = database.project_setting_get(project_id, "system_prompt")
+    return (override or _system_prompt()).strip()
+
+
+def _temperature_for_project(project_id: str | None = None) -> float:
+    if not project_id:
+        return _temperature()
+    raw = database.project_setting_get(project_id, "temperature")
+    if raw is None:
+        return _temperature()
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return _temperature()
+    return max(0.0, min(1.0, v))
+
+
+def _ollama_options(project_id: str | None = None) -> dict:
+    return {"temperature": _temperature_for_project(project_id), "num_ctx": 8192}
 
 
 # ---------------------------------------------------------------------------
@@ -1037,6 +1057,60 @@ async def api_update_settings(body: SettingsUpdate):
     return {"ok": True, "updated": list(updates), **(await api_get_settings())}
 
 
+# P7.7: project-level settings overrides
+class ProjectSettingsUpdate(BaseModel):
+    temperature: Optional[float] = None
+    system_prompt: Optional[str] = None
+
+
+@app.get("/api/projects/{project_id}/settings")
+async def api_get_project_settings(project_id: str):
+    """Return project-scoped settings merged with global defaults."""
+    project = database.project_get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    overrides = database.project_settings_all(project_id)
+    global_temp = _temperature()
+    global_sp = _system_prompt()
+    temp_raw = overrides.get("temperature")
+    try:
+        proj_temp = float(temp_raw) if temp_raw is not None else global_temp
+    except (TypeError, ValueError):
+        proj_temp = global_temp
+    proj_sp = overrides.get("system_prompt") or global_sp
+    return {
+        "project_id": project_id,
+        "temperature": max(0.0, min(1.0, proj_temp)),
+        "system_prompt": proj_sp.strip(),
+    }
+
+
+@app.put("/api/projects/{project_id}/settings")
+async def api_update_project_settings(project_id: str, body: ProjectSettingsUpdate):
+    """Persist project-scoped settings overrides."""
+    project = database.project_get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    updates: dict = {}
+    if body.temperature is not None:
+        try:
+            t = float(body.temperature)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="temperature must be a number")
+        if not math.isfinite(t):
+            t = _temperature()
+        t = max(0.0, min(1.0, t))
+        database.project_setting_set(project_id, "temperature", repr(t))
+        updates["temperature"] = t
+    if body.system_prompt is not None:
+        sp = body.system_prompt.strip()
+        if len(sp) > 4000:
+            raise HTTPException(status_code=422, detail="system_prompt too long (max 4000 chars)")
+        database.project_setting_set(project_id, "system_prompt", sp)
+        updates["system_prompt"] = sp
+    return {"ok": True, "updated": list(updates), **(await api_get_project_settings(project_id))}
+
+
 @app.get("/api/ollama/status")
 async def api_ollama_status():
     """Is Ollama reachable + how many models are installed (live probe)."""
@@ -1078,7 +1152,8 @@ async def chat(request: ChatRequest):
                 prefix, _count = await _rag_context_for_question(pids, request.message)
 
         if not OPENROUTER_API_KEY:  # Default to local Ollama
-            ollama = await call_ollama(enhanced_message, model_to_use, prefix_context=prefix)
+            first_pid = next((p.strip() for p in (request.project_ids or []) if p and p.strip()), None)
+            ollama = await call_ollama(enhanced_message, model_to_use, prefix_context=prefix, project_id=first_pid)
             response = ollama.get("content", "") if isinstance(ollama, dict) else ollama
         else:
             response = await call_openrouter(enhanced_message)
@@ -1097,7 +1172,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") -> str:
+async def call_ollama(prompt: str, model_name: str, prefix_context: str = "", project_id: str | None = None) -> dict:
     """Call local Ollama API (non-streaming).
 
     ``prefix_context`` is optional code context (RAG picks for project mode)
@@ -1115,11 +1190,11 @@ async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") ->
             json={
                 "model": model_name,
                 "messages": [
-                    {"role": "system", "content": _system_prompt()},
+                    {"role": "system", "content": _system_prompt_for_project(project_id)},
                     {"role": "user", "content": full_prompt},
                 ],
                 "stream": False,
-                "options": _ollama_options(),
+                "options": _ollama_options(project_id),
             }
         )
 
@@ -1135,7 +1210,7 @@ async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") ->
         if result.get("error"):
             raise HTTPException(status_code=502, detail=f"Ollama error: {result['error']}")
         message = result.get("message") or {}
-        prompt_tokens = sum(len(json.dumps(m)) // 4 for m in [{"role": "system", "content": _system_prompt()}, {"role": "user", "content": full_prompt}])
+        prompt_tokens = sum(len(json.dumps(m)) // 4 for m in [{"role": "system", "content": _system_prompt_for_project(project_id)}, {"role": "user", "content": full_prompt}])
         completion_tokens = len(message.get("content", "") or "") // 4
         return {
             "content": message.get("content", ""),
@@ -1215,6 +1290,7 @@ async def stream_ollama(
     model_name: str,
     tools: list[dict] | None = None,
     max_tool_rounds: int = 5,
+    project_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Stream responses from Ollama using the chat API with tool support.
 
@@ -1236,7 +1312,7 @@ async def stream_ollama(
                 "model": model_name,
                 "messages": messages,
                 "stream": True,
-                "options": _ollama_options(),
+                "options": _ollama_options(project_id),
             }
             if tools:
                 payload["tools"] = tools
@@ -1337,7 +1413,8 @@ async def stream_chat(
     Frontend receives typed events and appends to display progressively.
     """
     # P7.1: rebuild the full message list for the chat API
-    api_messages: list[dict] = [{"role": "system", "content": _system_prompt()}]
+    first_project_id = next((p.strip() for p in (project_ids or "").split(",") if p.strip()), None)
+    api_messages: list[dict] = [{"role": "system", "content": _system_prompt_for_project(first_project_id)}]
 
     # Previous conversation history (if provided)
     history: list[dict] = []
@@ -1383,7 +1460,7 @@ async def stream_chat(
     ]
 
     return StreamingResponse(
-        stream_ollama(api_messages, model_name, tools=tools or None),
+        stream_ollama(api_messages, model_name, tools=tools or None, project_id=first_project_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

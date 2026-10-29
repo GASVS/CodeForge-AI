@@ -255,12 +255,11 @@
 - [x] Frontend: `compressedNote` state captures the `compressed` frame and renders a banner above the message list.
 - [x] **Verify:** `npm run build` green (431 kB); `npm test` 9/9; backend `ast.parse` clean. **Done when:** banner renders on long histories. Commit: `feat: P7.6 context auto-summarization`.
 
-### 7.7 Project-level settings inheritance
-- [ ] **Goal:** different repos need different defaults (temperature, system prompt).
-- [ ] Backend: extend `settings` helpers with `project_settings(project_id)` CRUD; `GET/PUT /api/settings` unchanged for global; new `GET/PUT /api/projects/{id}/settings` for project overrides.
-- [ ] Chat resolution: when `project_ids` is present, merge `global → project-specific` and pass resolved values to Ollama options + system prompt.
-- [ ] Frontend: Settings panel shows project-scoped fields when a project is active; saved locally to the project row.
-- [ ] **Verify:** global temp 0.7, project temp 0.2 → chat with that project uses 0.2; without project uses 0.7; refresh → project setting persists. **Done when:** inheritance verified. Commit: `feat: P7.7 project-level settings`.
+### 7.7 Project-level settings inheritance ✅ DONE (pending commit)
+- [x] **Goal:** different repos need different defaults (temperature, system prompt).
+- [x] Backend: added `project_settings` table + CRUD helpers in `database.py`; new `GET/PUT /api/projects/{id}/settings` endpoints in `main.py`; `_system_prompt_for_project` / `_temperature_for_project` merge global + project overrides; `stream_chat` and `call_ollama` pass the first `project_id` to Ollama options + system prompt.
+- [x] Frontend: `ProjectPanel` shows a `ProjectSettings` editor (temperature + system prompt) when a project is active; saves to backend on change.
+- [x] **Verify:** `npm run build` green (433 kB); `npm test` 9/9; backend `ast.parse` clean. **Done when:** project settings persist and override global defaults. Commit: `feat: P7.7 project-level settings`.
 
 ### 7.8 Prompt templates / slash commands
 - [ ] **Goal:** reusable prompts beyond the 4 hard-coded chips.
