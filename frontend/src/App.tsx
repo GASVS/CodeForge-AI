@@ -38,6 +38,9 @@ interface Message {
   content: string;
   role: 'user' | 'assistant';
   timestamp: Date;
+  error?: string; // Phase 4: styled error card instead of inline text
+  toolCalls?: Array<{ id: string; name: string; args: any }>;
+  toolResults?: Record<string, any>;
 }
 
 function SendIcon() {
@@ -341,6 +344,14 @@ function App() {
     document.documentElement.setAttribute('data-theme', newTheme);
   };
 
+  const retryLastMessage = () => {
+    const userMsg = [...messages].reverse().find(m => m.role === 'user');
+    const assistantMsg = messages[messages.length - 1];
+    if (!userMsg || !assistantMsg || assistantMsg.role !== 'assistant') return;
+    setMessages(prev => prev.filter(m => m.id !== userMsg.id && m.id !== assistantMsg.id));
+    sendMessage(userMsg.content);
+  };
+
   const sendMessage = async (content: string) => {
     if (!content.trim() || isLoading) return;
 
@@ -422,10 +433,6 @@ function App() {
       watchdog = setTimeout(() => {
         // No data for 20 s → model is hung / connection died → fail soft
         streamError = streamError || 'No response from the model — the stream stalled.';
-        setContent(
-          (fullContent ? fullContent + '\n\n' : '') +
-            '⚠️ ' + streamError
-        );
         finish('stall');
       }, ms);
     };
@@ -436,14 +443,29 @@ function App() {
       if (watchdog) clearTimeout(watchdog);
       streamRef.current = null;
       setIsLoading(false);
-      if (kind !== 'done') {
-        // stopped/stalled: keep the partial answer + a short note
-        const note =
-          kind === 'stop' ? (fullContent ? '\n\n⏹ — generation stopped' : '⏹ — stopped before any text arrived')
-          : (fullContent ? '\n\n⚠️ ' + (streamError || 'Generation timed out.')
-          : '⚠️ ' + (streamError || 'Generation timed out. The model may still be thinking — try again.'));
-        setContent(fullContent + note);
-        fullContent = fullContent + note;
+      if (streamError) {
+        // Stream/connection error → red card with retry (keep partial text)
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMsgId ? { ...msg, error: streamError! } : msg
+        ));
+      } else if (kind === 'stop') {
+        // User-initiated stop: keep partial text + inline note (no retry)
+        if (!fullContent) {
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMsgId ? { ...msg, content: '⏹ — stopped before any text arrived' } : msg
+          ));
+          fullContent = '⏹ — stopped before any text arrived';
+        } else {
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantMsgId ? { ...msg, content: fullContent + '\n\n⏹ — generation stopped' } : msg
+          ));
+          fullContent = fullContent + '\n\n⏹ — generation stopped';
+        }
+      } else if (kind !== 'done') {
+        // Timeout/stall → error card with retry
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantMsgId ? { ...msg, error: 'Generation timed out. The model may still be thinking — try again.' } : msg
+        ));
       }
       persistFinal(fullContent);
     };
@@ -456,6 +478,13 @@ function App() {
         model_name: model,
         file_ids: fileIds,
       });
+      // P7.1: send conversation history for multi-turn + tool-call support
+      const historyForApi = nextMessages
+        .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content && m.id !== assistantMsgId))
+        .map(m => ({ role: m.role, content: m.content }));
+      if (historyForApi.length > 0) {
+        params.set('messages', JSON.stringify(historyForApi));
+      }
       // P3.2: RAG mode active → backend picks the top relevant chunks of the
       // imported project for this question (file_ids still ride along as an
       // explicit selection, but the RAG prefix does the grounding).
@@ -472,23 +501,38 @@ function App() {
         }
         try {
           const data = JSON.parse(event.data);
-          if (data.text) {
+          const type = data.type || 'text';
+
+          if (type === 'text' && data.text) {
             if (!streamStarted) {
-              // First real token: thinking phase is over, drop the indicator
               setStreamStarted(true);
             }
             armWatchdog();
             fullContent += data.text;
             setContent(fullContent);
+          } else if (type === 'tool_call') {
+            armWatchdog();
+            setMessages(prev => ([
+              ...prev,
+              {
+                id: `tool-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                content: '',
+                role: 'assistant',
+                timestamp: new Date(),
+                toolCalls: [{ id: data.id, name: data.name, args: data.args }],
+              } as Message
+            ]));
+          } else if (type === 'tool_result') {
+            armWatchdog();
+            setMessages(prev => prev.map(msg =>
+              (msg.toolCalls && msg.toolCalls.some(tc => tc.id === data.id))
+                ? { ...msg, toolResults: { ...(msg.toolResults || {}), [data.id]: data.result } }
+                : msg
+            ));
           } else if (data.error) {
             streamError = data.error;
-            setContent(
-              (fullContent ? fullContent + '\n\n' : '') +
-                '⚠️ ' + data.error
-            );
-            fullContent = fullContent + (fullContent ? '\n\n' : '') + '⚠️ ' + data.error;
             try { eventSource.close(); } catch { /* noop */ }
-            finish('done'); // treated as complete: error already rendered inline
+            finish('done'); // error will be rendered as a card below partial content
           }
         } catch (e) {
           console.error('Failed to parse stream data:', e);
@@ -499,12 +543,8 @@ function App() {
         console.error('EventSource failed:', error);
         if (finished) return; // Stop/timeout already handled it
         streamError = streamError || 'Lost connection to the model while streaming.';
-        setContent(
-          (fullContent ? fullContent + '\n\n' : '') +
-            '⚠️ ' + streamError
-        );
-        fullContent = fullContent + (fullContent ? '\n\n' : '') + '⚠️ ' + streamError;
-        finish();
+        try { eventSource.close(); } catch { /* noop */ }
+        finish('done');
       };
 
       // Expose the stream handle so the Stop button can abort mid-stream
@@ -966,6 +1006,49 @@ function App() {
                         >
                           {msg.content}
                         </ReactMarkdown>
+                        {/* P7.1 tool-call cards */}
+                        {msg.toolCalls && msg.toolCalls.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {msg.toolCalls.map(tc => (
+                              <div key={tc.id} className={`p-3 rounded-lg border ${
+                                theme === 'dark' ? 'bg-slate-950 border-slate-700' : 'bg-gray-50 border-gray-200'
+                              }`}>
+                                <div className="flex items-center gap-2 text-sm font-medium">
+                                  <span>🔧</span>
+                                  <span>{tc.name}</span>
+                                </div>
+                                <pre className="mt-2 text-xs font-mono opacity-70 overflow-x-auto">
+                                  {JSON.stringify(tc.args, null, 2)}
+                                </pre>
+                                {msg.toolResults?.[tc.id] !== undefined && (
+                                  <div className={`mt-2 p-2 rounded border text-xs font-mono ${
+                                    theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'
+                                  }`}>
+                                    <div className="opacity-70 mb-1">Result:</div>
+                                    <pre className="whitespace-pre-wrap break-words">
+                                      {typeof msg.toolResults[tc.id] === 'string'
+                                        ? msg.toolResults[tc.id]
+                                        : JSON.stringify(msg.toolResults[tc.id], null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Error card with retry */}
+                        {msg.error && (
+                          <div className="mt-3 p-3 rounded-lg border border-rose-500/50 bg-rose-500/10">
+                            <div className="text-sm text-rose-500 font-medium">Error</div>
+                            <div className="text-sm mt-1 whitespace-pre-wrap">{msg.error}</div>
+                            <button
+                              onClick={retryLastMessage}
+                              className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-600 hover:bg-rose-500 text-white transition-colors"
+                            >
+                              Retry
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap">{msg.content}</div>

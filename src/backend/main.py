@@ -25,6 +25,7 @@ import uuid
 import shutil
 import sys
 import os
+import asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import database
 
@@ -970,12 +971,14 @@ async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") ->
     )
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
+            f"{OLLAMA_BASE_URL}/api/chat",
             json={
                 "model": model_name,
-                "prompt": full_prompt,
-                "system": _system_prompt(),
-                "stream": False,  # Non-streaming for simple endpoint
+                "messages": [
+                    {"role": "system", "content": _system_prompt()},
+                    {"role": "user", "content": full_prompt},
+                ],
+                "stream": False,
                 "options": _ollama_options(),
             }
         )
@@ -991,35 +994,65 @@ async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") ->
         result = response.json()
         if result.get("error"):
             raise HTTPException(status_code=502, detail=f"Ollama error: {result['error']}")
-        return result.get("response", "")
+        return result.get("message", {}).get("content", "")
 
 
-async def stream_ollama(prompt: str, model_name: str, prefix_context: str = "") -> AsyncGenerator[str, None]:
-    """Stream responses from Ollama in real-time.
+# P7.1 tool registry — populated by later phases (code indexer, etc.)
+TOOL_REGISTRY: dict[str, dict] = {}
 
-    ``prefix_context`` (RAG picks for project mode) is prepended to the
-    prompt as a labelled code-context block before streaming begins.
+def register_tool(name: str, description: str, parameters: dict, handler):
+    TOOL_REGISTRY[name] = {
+        "name": name,
+        "description": description,
+        "parameters": parameters,
+        "handler": handler,
+    }
 
-    Errors (unknown model, Ollama down, 5xx) are delivered as a single
-    SSE `error` frame followed by `[DONE]`, so the frontend can render an
-    error card instead of hanging on an empty stream.
+async def _execute_tool_call(tool_call: dict) -> dict:
+    name = tool_call.get("function", {}).get("name", "")
+    args = tool_call.get("function", {}).get("arguments", {})
+    tool = TOOL_REGISTRY.get(name)
+    if not tool:
+        return {"name": name, "result": {"error": f"Unknown tool: {name}"}}
+    try:
+        result = tool["handler"](args)
+        if asyncio.iscoroutine(result):
+            result = await result
+        return {"name": name, "result": result}
+    except Exception as e:
+        return {"name": name, "result": {"error": str(e)}}
+
+async def stream_ollama(
+    messages: list[dict],
+    model_name: str,
+    tools: list[dict] | None = None,
+    max_tool_rounds: int = 5,
+) -> AsyncGenerator[str, None]:
+    """Stream responses from Ollama using the chat API with tool support.
+
+    Emits typed SSE frames:
+    - {"type":"text","text":"..."} for model text
+    - {"type":"tool_call","id":"...","name":"...","args":{...}} for tool requests
+    - {"type":"tool_result","id":"...","result":{...}} for tool results
+    - {"type":"error","error":"..."} on failure
+    - [DONE] when complete
     """
-    full_prompt = (
-        (prefix_context.rstrip() + "\n\n" + prompt) if prefix_context else prompt
-    )
     emitted_done = False
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
+            payload = {
+                "model": model_name,
+                "messages": messages,
+                "stream": True,
+                "options": _ollama_options(),
+            }
+            if tools:
+                payload["tools"] = tools
+
             async with client.stream(
                 "POST",
-                f"{OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": model_name,
-                    "prompt": full_prompt,
-                    "system": _system_prompt(),
-                    "stream": True,  # Enable streaming
-                    "options": _ollama_options(),
-                }
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json=payload,
             ) as response:
                 if response.status_code in (400, 404):
                     raise HTTPException(
@@ -1029,26 +1062,59 @@ async def stream_ollama(prompt: str, model_name: str, prefix_context: str = "") 
                 if response.status_code >= 500:
                     raise HTTPException(status_code=502, detail=f"Ollama error: HTTP {response.status_code}")
 
+                last_content = ""
                 async for line in response.aiter_lines():
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            if data.get("error"):
-                                raise RuntimeError(str(data["error"]))
-                            chunk = data.get("response")
-                            if chunk:
-                                yield f"data: {json.dumps({'text': chunk})}\n\n"
-                            if data.get("done", False):
-                                emitted_done = True
-                                yield "data: [DONE]\n\n"
-                                return
-                        except json.JSONDecodeError as e:
-                            # Ollama may send a plain-text error line; surface it
-                            logger.error(f"Unparseable stream line: {line}, error: {e}")
-                            if line and not line.startswith("{"):
-                                raise RuntimeError(line)
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Unparseable stream line: {line}, error: {e}")
+                        if line and not line.startswith("{"):
+                            raise RuntimeError(line)
+                        continue
+
+                    if data.get("error"):
+                        raise RuntimeError(str(data["error"]))
+
+                    if data.get("done", False):
+                        msg = data.get("message") or {}
+                        if msg.get("tool_calls") and max_tool_rounds > 0:
+                            tool_calls = msg["tool_calls"]
+                            for tc in tool_calls:
+                                tc_id = tc.get("function", {}).get("name", "call_" + str(len(messages)))
+                                yield f"data: {json.dumps({'type': 'tool_call', 'id': tc_id, 'name': tc.get('function', {}).get('name', ''), 'args': tc.get('function', {}).get('arguments', {})})}\n\n"
+
+                            tool_results = []
+                            for tc in tool_calls:
+                                result = await _execute_tool_call(tc)
+                                tool_results.append({
+                                    "role": "tool",
+                                    "content": json.dumps(result["result"]),
+                                    "name": result["name"],
+                                })
+                                yield f"data: {json.dumps({'type': 'tool_result', 'id': tc.get('function', {}).get('name', ''), 'result': result['result']})}\n\n"
+
+                            new_messages = messages + [
+                                {"role": "assistant", "content": msg.get("content", ""), "tool_calls": tool_calls}
+                            ] + tool_results
+                            async for frame in stream_ollama(new_messages, model_name, tools, max_tool_rounds - 1):
+                                yield frame
+                            return
+
+                        emitted_done = True
+                        yield "data: [DONE]\n\n"
+                        return
+
+                    msg = data.get("message") or {}
+                    if msg.get("role") == "assistant":
+                        content = msg.get("content", "") or ""
+                        if len(content) > len(last_content):
+                            delta = content[len(last_content):]
+                            yield f"data: {json.dumps({'type': 'text', 'text': delta})}\n\n"
+                            last_content = content
     except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
         if not emitted_done:
             yield "data: [DONE]\n\n"
 
@@ -1059,6 +1125,7 @@ async def stream_chat(
     model_name: str = "qwen3.5-9b-64k:latest",
     file_ids: Optional[str] = None,
     project_ids: Optional[str] = None,
+    messages: Optional[str] = None,
 ):
     """
     Stream API endpoint using Server-Sent Events (SSE).
@@ -1069,28 +1136,60 @@ async def stream_chat(
     - file_ids: Comma-separated uploaded file IDs to include as context
     - project_ids: Comma-separated imported-project IDs — when present, the
       message is RAG-augmented (top relevant chunks from those projects)
+    - messages: JSON array of previous {role, content} turns (optional; enables
+      multi-turn + tool-call rounds)
 
     Returns real-time tokens as they're generated by the LLM.
-    Frontend receives events and appends to display progressively.
+    Frontend receives typed events and appends to display progressively.
     """
+    # P7.1: rebuild the full message list for the chat API
+    api_messages: list[dict] = [{"role": "system", "content": _system_prompt()}]
+
+    # Previous conversation history (if provided)
+    if messages:
+        try:
+            history = json.loads(messages)
+            for m in history:
+                if m.get("role") in ("user", "assistant"):
+                    api_messages.append({"role": m["role"], "content": m.get("content", "") or ""})
+        except json.JSONDecodeError:
+            pass
+
     # Classic flow: selected uploaded/project files concatenated into the prompt.
     ids = [fid.strip() for fid in file_ids.split(",") if fid.strip()] if file_ids else None
+    current_message = message
     if ids:
-        message = add_file_context(message, ids)
+        current_message = add_file_context(current_message, ids)
 
     # P3.2: project mode — RAG-augment the message with the top relevant chunks.
     prefix = ""
     pids = [p.strip() for p in project_ids.split(",") if p.strip()] if project_ids else []
     if pids:
-        prefix, _count = await _rag_context_for_question(pids, message)
+        prefix, _count = await _rag_context_for_question(pids, current_message)
+
+    current_message = (prefix.rstrip() + "\n\n" + current_message) if prefix else current_message
+    api_messages.append({"role": "user", "content": current_message})
+
+    # P7.1: expose registered tools to the model so it can request them
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["parameters"],
+            },
+        }
+        for t in TOOL_REGISTRY.values()
+    ]
 
     return StreamingResponse(
-        stream_ollama(message, model_name, prefix_context=prefix),
+        stream_ollama(api_messages, model_name, tools=tools or None),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",  
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
