@@ -150,8 +150,27 @@ function App() {
   const [lastUsage, setLastUsage] = useState<{ prompt_tokens: number; completion_tokens: number; total_tokens: number } | null>(null);
   // P7.6 context compression notice from the stream
   const [compressedNote, setCompressedNote] = useState<string | null>(null);
+  // P7.8 prompt templates (skills)
+  const [skills, setSkills] = useState<{ name: string; title: string; body: string; model_override?: string }[]>([]);
+  const [showSkillPalette, setShowSkillPalette] = useState(false);
+
+  const loadSkills = () =>
+    fetch(`${API_URL}/api/skills`)
+      .then(r => r.ok ? r.json() : { skills: [] })
+      .then(d => setSkills(d.skills || []))
+      .catch(() => setSkills([]));
+
+  const insertSkill = (body: string) => {
+    setInput(prev => (prev ? prev + '\n\n' : '') + body);
+    setShowSkillPalette(false);
+    inputRef.current?.focus();
+  };
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
+
+  useEffect(() => {
+    loadSkills();
+  }, [API_URL]);
 
   // Load theme from localStorage
   useEffect(() => {
@@ -1395,6 +1414,35 @@ function App() {
             )}
           </button>
 
+          {/* P7.8: prompt templates palette toggle */}
+          <button
+            onClick={() => setShowSkillPalette(v => !v)}
+            className={`shrink-0 p-3 rounded-xl transition-colors ${showSkillPalette ? (theme === 'dark' ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white') : (theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100')}`}
+            title="Prompt templates"
+          >
+            <span className="text-sm font-medium">📝</span>
+          </button>
+
+          {showSkillPalette && (
+            <div className={`absolute bottom-16 right-4 z-50 w-72 max-h-64 overflow-y-auto rounded-xl border shadow-2xl ${theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'}`}>
+              <div className="p-2 border-b border-current opacity-70 text-xs font-medium">Prompt templates</div>
+              {skills.length === 0 && (
+                <div className="p-3 text-xs opacity-50">No templates yet.</div>
+              )}
+              {skills.map(s => (
+                <button
+                  key={s.name}
+                  onClick={() => insertSkill(s.body)}
+                  className={`w-full text-left px-3 py-2 text-xs border-b border-current opacity-80 hover:opacity-100 transition-colors last:border-0 ${theme === 'dark' ? 'border-slate-800' : 'border-gray-100'}`}
+                  title={s.model_override ? `Model override: ${s.model_override}` : undefined}
+                >
+                  <div className="font-medium">{s.title}</div>
+                  <div className="opacity-50">/{s.name}</div>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Thinking indicator: only while waiting for the first token */}
           {isLoading && !streamStarted && (
             <div className="flex items-center gap-2 opacity-70 px-1">
@@ -1428,6 +1476,17 @@ function App() {
               onKeyDown={(e) => {
                 // Enter = send, Shift+Enter = newline (Phase 4.2)
                 if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
+                  const trimmed = input.trim();
+                  // P7.8: slash command expansion
+                  if (trimmed.startsWith('/')) {
+                    const name = trimmed.slice(1).split(/\s+/)[0];
+                    const skill = skills.find(s => s.name === name);
+                    if (skill) {
+                      e.preventDefault();
+                      insertSkill(skill.body);
+                      return;
+                    }
+                  }
                   e.preventDefault();
                   sendMessage(input);
                 }

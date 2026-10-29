@@ -1111,6 +1111,35 @@ async def api_update_project_settings(project_id: str, body: ProjectSettingsUpda
     return {"ok": True, "updated": list(updates), **(await api_get_project_settings(project_id))}
 
 
+# P7.8 prompt templates (skills)
+@app.get("/api/skills")
+async def api_list_skills():
+    """List available prompt templates (skills)."""
+    return {"skills": database.skill_list()}
+
+
+@app.get("/api/skills/{name}")
+async def api_get_skill(name: str):
+    """Get a single prompt template by name."""
+    skill = database.skill_get(name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return skill
+
+
+@app.post("/api/skills")
+async def api_create_skill(body: dict):
+    """Create or update a prompt template."""
+    name = (body.get("name") or "").strip()
+    title = (body.get("title") or "").strip()
+    prompt_body = (body.get("body") or "").strip()
+    model_override = body.get("model_override")
+    if not name or not title or not prompt_body:
+        raise HTTPException(status_code=422, detail="name, title, and body are required")
+    skill = database.skill_create(name, title, prompt_body, model_override)
+    return skill
+
+
 @app.get("/api/ollama/status")
 async def api_ollama_status():
     """Is Ollama reachable + how many models are installed (live probe)."""

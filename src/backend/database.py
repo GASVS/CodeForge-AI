@@ -78,6 +78,15 @@ def get_db() -> sqlite3.Connection:
                )"""
         )
         _conn.execute(
+            """CREATE TABLE IF NOT EXISTS skills (
+                   name TEXT PRIMARY KEY,
+                   title TEXT NOT NULL,
+                   body TEXT NOT NULL,
+                   model_override TEXT,
+                   updated_at INTEGER NOT NULL
+               )"""
+        )
+        _conn.execute(
             """CREATE TABLE IF NOT EXISTS project_files (
                    id TEXT PRIMARY KEY,
                    project_id TEXT NOT NULL,
@@ -501,6 +510,30 @@ def project_settings_all(project_id: str) -> dict:
             "SELECT key, value FROM project_settings WHERE project_id=?", (project_id,)
         ).fetchall()
     return {r["key"]: r["value"] for r in rows}
+
+
+# --- Phase 7.8: prompt templates (skills) --------------------------------
+
+def skill_create(name: str, title: str, body: str, model_override: str | None = None) -> dict:
+    with _lock:
+        get_db().execute(
+            "INSERT INTO skills (name, title, body, model_override, updated_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(name) DO UPDATE SET title=excluded.title, body=excluded.body, model_override=excluded.model_override, updated_at=excluded.updated_at",
+            (name, title, body, model_override, _now()))
+        get_db().commit()
+    return {"name": name, "title": title, "body": body, "model_override": model_override}
+
+
+def skill_get(name: str) -> dict | None:
+    with _lock:
+        row = get_db().execute("SELECT * FROM skills WHERE name=?", (name,)).fetchone()
+    return dict(row) if row else None
+
+
+def skill_list() -> list[dict]:
+    with _lock:
+        rows = get_db().execute("SELECT name, title, model_override FROM skills ORDER BY title").fetchall()
+    return [dict(r) for r in rows]
 
 
 # --- Phase 3: embeddings (RAG) ----------------------------------------------

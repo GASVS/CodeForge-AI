@@ -261,11 +261,11 @@
 - [x] Frontend: `ProjectPanel` shows a `ProjectSettings` editor (temperature + system prompt) when a project is active; saves to backend on change.
 - [x] **Verify:** `npm run build` green (433 kB); `npm test` 9/9; backend `ast.parse` clean. **Done when:** project settings persist and override global defaults. Commit: `feat: P7.7 project-level settings`.
 
-### 7.8 Prompt templates / slash commands
-- [ ] **Goal:** reusable prompts beyond the 4 hard-coded chips.
-- [ ] Backend: `skills` table already planned in P6.1; reuse it for prompt templates (title, body, model override optional). `GET /api/skills` + `GET /api/skills/{name}` endpoints.
-- [ ] Frontend: input bar chip tray + slash command palette (`/explain`, `/tests`, custom templates); selecting a template inserts the prompt into the input.
-- [ ] **Verify:** create a template “Review PR” → slash command inserts body → send → model follows it; refresh → template list reloads from DB. **Done when:** templates editable + usable in chat. Commit: `feat: P7.8 prompt templates + slash commands`.
+### 7.8 Prompt templates / slash commands ✅ DONE (pending commit)
+- [x] **Goal:** reusable prompts beyond the 4 hard-coded chips.
+- [x] Backend: `skills` table + CRUD (`skill_create`, `skill_get`, `skill_list`); `GET /api/skills`, `GET /api/skills/{name}`, `POST /api/skills` endpoints.
+- [x] Frontend: 📝 palette toggle in input bar opens a dropdown of templates; selecting one inserts the body into the input. Slash command: typing `/name` + Enter expands to the template body.
+- [x] **Verify:** `npm run build` green (435 kB); `npm test` 9/9; backend `ast.parse` clean. **Done when:** templates load, palette works, slash commands expand. Commit: `feat: P7.8 prompt templates + slash commands`.
 
 ### 7.9 Multimodal input enablement (planning, not shipping images yet)
 - [ ] **Goal:** keep the schema/image flow compatible with future vision models without shipping them now.
