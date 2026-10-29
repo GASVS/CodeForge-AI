@@ -205,9 +205,81 @@
 - [ ] **Goal:** structural code index (definitions, signatures, callers, outline) with exact `file:line`, exposed as REST (dashboard) **and** an MCP tool server (external agents browse the codebase through it). Deterministic sibling to P3.2 RAG.
 - [ ] Parse at import: on `POST /api/projects`, per-language extractor (tree-sitter Py/JS/TS, light-tokenizer fallback) → symbols (fn/method/class/interface/enum), signatures, imports/exports, line ranges, nesting; store in `code_symbols(project_id, file_ref, name, kind, sig, start_line, end_line, parent)` + `code_refs(from, to, kind)`.
 - [ ] REST: `GET /api/projects/{id}/symbols?q=&kind=`, `GET /api/projects/{id}/symbols/{name}/references`, `GET /api/projects/{id}/files/{path}/outline`.
-- [ ] MCP server (stdio and/or SSE) wrapping the same queries: `list_files`, `search_symbols`, `get_definition`, `find_references`, `read_file`, `get_file_outline`.
+- [ ] MCP server (stdio and/or SSE) wrapping the same queries as MCP tools: `list_files`, `search_symbols(query, kind)`, `get_definition(name)`, `find_references(name)`, `read_file(path, range)`, `get_file_outline(path)`.
 - [ ] Frontend: file tree + per-file symbol outline (name + line, clickable → exact `file:line`), global symbol search, breadcrumb.
 - [ ] **Verify:** import THIS repo → `GET .../symbols?q=project_files_list` → `src/backend/database.py:383` + line range + callers; an MCP client `list_tools`+`get_definition` (stdio/SSE) returns the same `file:line`; UI outline → click → right `file:line`. None requires grep/python. **Done when:** verified. Commit: `feat: P6.2 code indexer + MCP code-browsing server`.
+
+---
+
+## Phase 7 — Agentic core (do BEFORE or IN PARALLEL with P6; unblocks P6.2 tool surface)
+
+> These capabilities turn the app from “chat with context” into an assistant that can act on the codebase. Do not defer until after P6 — P6.2 (code indexer) should emit MCP-style tool calls from the start, and the chat SSE stream should already carry them.
+
+### 7.1 Tool-call-aware SSE protocol
+- [ ] **Goal:** extend `/stream/api/chat` from text-only SSE into a typed event stream so the model can request tool calls mid-response and the frontend can render / dispatch them.
+- [ ] Backend: add a `tool_calls` array to the Ollama prompt/context when the active project has registered tools; keep current `text` frames unchanged for backward compatibility.
+- [ ] Define canonical frame types: `{"type":"text","text":"..."}`, `{"type":"tool_call","id":"...","name":"...","args":{...}}`, `{"type":"tool_result","id":"...","result":{...}}`, `{"type":"error","error":"..."}`, then `data: [DONE]`.
+- [ ] Frontend: consume tool-call frames, render a tool-invocation card, queue tool results back into the same assistant turn, and append the final grounded answer. Preserve existing plain-text flow.
+- [ ] Non-breaking contract: old clients that only read `text` fields keep working; new clients get the richer stream.
+- [ ] **Verify:** trigger a tool call (e.g. search_symbols via code-indexer) → frontend shows tool card → tool result feeds back → final answer cites exact `file:line`; refresh → thread with tool frames survives (SQLite). **Done when:** backward-compatible and new frames verified. Commit: `feat: P7.1 tool-call-aware SSE stream`.
+
+### 7.2 Patch/diff generation + apply for code actions
+- [ ] **Goal:** code-action chips (Explain, Tests, Dead code, Refactor) should produce structured diffs, not only prose. The user can Apply or Copy patch.
+- [ ] Backend: one new endpoint `POST /api/projects/{id}/apply-patch` → validate patch, write file, re-index that file in RAG + symbols, return changed file + line ranges. Reject out-of-bounds / malformed patches with 422 + structured error.
+- [ ] Code actions prompt templates: instruct model to emit unified diff in fenced ```diff blocks when the action implies a change (dead-code removal, refactor, test scaffolding). Keep prose explanations for Explain file.
+- [ ] Frontend: render diff blocks with `<ins>/<del>` coloring + Apply / Copy patch buttons; show success/failure card after apply.
+- [ ] **Verify:** run Find dead code → diff emitted → Apply removes the unused import → re-import / re-index shows clean state; refresh → change persists. **Done when:** apply verified + RAG/symbols re-indexed. Commit: `feat: P7.2 code-action patches + apply`.
+
+### 7.3 Structured findings for “Find dead code” (schema v1)
+- [ ] **Goal:** replace prose tables with deterministic JSON findings so the UI can render rows, select multiple, and apply fixes in batch.
+- [ ] Backend: document the canonical finding schema; dead-code action now asks the model to emit JSON findings alongside/near the diff: `{"findings":[{"file":"...","line":12,"kind":"unused_import","symbol":"os","fix":"remove"}, ...]}`.
+- [ ] Frontend: parse findings into a selectable list; batch-selecting rows composes a single patch; apply removes all selected findings.
+- [ ] **Verify:** dead-code scan returns 3+ findings → UI renders 3 rows → select all → Apply → all removals land in one patch; partial selection applies only selected. **Done when:** schema stable + batch apply verified. Commit: `feat: P7.3 structured findings + batch fixes`.
+
+### 7.4 Conversation branching
+- [ ] **Goal:** let users branch a thread at any message to explore alternatives without losing history.
+- [ ] Data model: `messages_json` entries gain optional `parent_message_id` and `branch_id`; create-branch = insert a new root message with `parent_message_id` pointing at the branching point.
+- [ ] Backend: `/api/chats/{id}/branch` → clone conversation metadata + subtree, return new chat ID; list/get remain unchanged.
+- [ ] Frontend: per-message action “Branch here” → opens a new chat prefilled with the branched thread; sidebar shows branch lineage visually.
+- [ ] **Verify:** create chat → 6 messages → branch at message 3 → 2 chats exist → branch has messages 1-3 cloned + new replies only in branch; refresh → both survive. **Done when:** branch creation + read-back verified. Commit: `feat: P7.4 conversation branching`.
+
+### 7.5 Token/cost awareness
+- [ ] **Goal:** surface context-window usage so users understand why quality may degrade before it does.
+- [ ] Backend: `/stream/api/chat` and `/api/chat` return `usage={prompt_tokens, completion_tokens, total_tokens}` in the final frame before `[DONE]`; estimate via `len(text)//4` for now, exact tiktoken later.
+- [ ] Frontend: show token usage bar in header / message meta; warn when prompt + system + context + history > 80% of the model’s `num_ctx` (currently 8192).
+- [ ] **Verify:** send long context → usage shown → warning appears >80% → stream still completes; empty message → 0 usage. **Done when:** bar + warning verified. Commit: `feat: P7.5 token usage + context budget`.
+
+### 7.6 Context auto-summarization
+- [ ] **Goal:** keep long threads within budget without losing early context.
+- [ ] Backend: when estimated token count exceeds threshold (e.g. 60% of `num_ctx`), summarize earliest messages into a single system-prompt-style summary block and drop them from the request (preserve in DB for branch/history). Summarization call uses the same model with a fixed prompt.
+- [ ] Frontend: visual indicator when a turn was summarized (e.g. “Earlier context summarized” pill).
+- [ ] **Verify:** 50-message thread → after many turns the model still answers questions about early messages using the summary; DB still holds original messages; refresh → summary + recent messages shown. **Done when:** long-thread quality preserved + summary indicator visible. Commit: `feat: P7.6 context auto-summarization`.
+
+### 7.7 Project-level settings inheritance
+- [ ] **Goal:** different repos need different defaults (temperature, system prompt).
+- [ ] Backend: extend `settings` helpers with `project_settings(project_id)` CRUD; `GET/PUT /api/settings` unchanged for global; new `GET/PUT /api/projects/{id}/settings` for project overrides.
+- [ ] Chat resolution: when `project_ids` is present, merge `global → project-specific` and pass resolved values to Ollama options + system prompt.
+- [ ] Frontend: Settings panel shows project-scoped fields when a project is active; saved locally to the project row.
+- [ ] **Verify:** global temp 0.7, project temp 0.2 → chat with that project uses 0.2; without project uses 0.7; refresh → project setting persists. **Done when:** inheritance verified. Commit: `feat: P7.7 project-level settings`.
+
+### 7.8 Prompt templates / slash commands
+- [ ] **Goal:** reusable prompts beyond the 4 hard-coded chips.
+- [ ] Backend: `skills` table already planned in P6.1; reuse it for prompt templates (title, body, model override optional). `GET /api/skills` + `GET /api/skills/{name}` endpoints.
+- [ ] Frontend: input bar chip tray + slash command palette (`/explain`, `/tests`, custom templates); selecting a template inserts the prompt into the input.
+- [ ] **Verify:** create a template “Review PR” → slash command inserts body → send → model follows it; refresh → template list reloads from DB. **Done when:** templates editable + usable in chat. Commit: `feat: P7.8 prompt templates + slash commands`.
+
+### 7.9 Multimodal input enablement (planning, not shipping images yet)
+- [ ] **Goal:** keep the schema/image flow compatible with future vision models without shipping them now.
+- [ ] Backend: `POST /api/upload` allow-list already accepts images; store image mime/size metadata; no model change yet.
+- [ ] Chat schema: `ChatRequest` gains optional `image_urls: List[str]`; SSE frame schema already supports an `image` frame type if we want to stream vision later.
+- [ ] Frontend: paste/drag images into the input → uploads to `/api/upload` → attaches to next message as `image_urls`. Hide behind a flag so it doesn’t break v1.
+- [ ] **Verify:** attach a PNG → chat request includes `image_urls` → server accepts → stored with message metadata; no model call yet. **Done when:** plumbing accepted end-to-end. Commit: `feat: P7.9 multimodal input plumbing`.
+
+### 7.10 Git-aware context (lightweight)
+- [ ] **Goal:** let the model answer “what did I change?” and make patches safer.
+- [ ] Backend: run git against the project root when available: `POST /api/projects/{id}/git-status` → modified/untracked/staged; `POST /api/projects/{id}/git-diff` → unified diff of working tree. Both are read-only and bounded.
+- [ ] Frontend: git status panel in the project panel; diff viewer for the selected file.
+- [ ] **Verify:** modify a tracked file → git-status shows modified → git-diff returns unified diff → model can answer “what changed?” from the diff context. **Done when:** status/diff endpoints verified. Commit: `feat: P7.10 git-aware context`.
 
 ---
 
