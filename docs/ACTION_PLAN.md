@@ -236,12 +236,12 @@
 - [x] Frontend: parse findings into a selectable list; batch-selecting rows highlights them; apply patch applies the composed diff (v1 applies full diff; selection is for visibility/audit).
 - [x] **Verify:** dead-code scan returns 3+ findings → UI renders 3 rows → select all → Apply → all removals land in one patch; partial selection applies only selected. **Done when:** schema stable + batch apply verified. Commit: `feat: P7.3 structured findings + batch fixes`.
 
-### 7.4 Conversation branching
-- [ ] **Goal:** let users branch a thread at any message to explore alternatives without losing history.
-- [ ] Data model: `messages_json` entries gain optional `parent_message_id` and `branch_id`; create-branch = insert a new root message with `parent_message_id` pointing at the branching point.
-- [ ] Backend: `/api/chats/{id}/branch` → clone conversation metadata + subtree, return new chat ID; list/get remain unchanged.
-- [ ] Frontend: per-message action “Branch here” → opens a new chat prefilled with the branched thread; sidebar shows branch lineage visually.
-- [ ] **Verify:** create chat → 6 messages → branch at message 3 → 2 chats exist → branch has messages 1-3 cloned + new replies only in branch; refresh → both survive. **Done when:** branch creation + read-back verified. Commit: `feat: P7.4 conversation branching`.
+### 7.4 Conversation branching ✅ DONE (pending commit)
+- [x] **Goal:** let users branch a thread at any message to explore alternatives without losing history.
+- [x] Data model: `messages_json` entries gain optional `parent_message_id` and `branch_id`; `conversations` gains optional `parent_chat_id`; create-branch clones all messages up to the chosen index with fresh IDs, `parent_message_id`, and shared `branch_id`.
+- [x] Backend: `POST /api/chats/{id}/branch` (`message_index` 0-based inclusive) → clones conversation metadata + subtree, returns new chat ID; list/get remain unchanged.
+- [x] Frontend: per-message action “Branch here” → opens a new chat prefilled with the branched thread; sidebar shows branch lineage visually (⑂ marker for branches).
+- [x] **Verify:** create chat → 6 messages → branch at message 3 → 2 chats exist → branch has messages 1-3 cloned + new replies only in branch; refresh → both survive. **Done when:** branch creation + read-back verified. Commit: `feat: P7.4 conversation branching`.
 
 ### 7.5 Token/cost awareness
 - [ ] **Goal:** surface context-window usage so users understand why quality may degrade before it does.

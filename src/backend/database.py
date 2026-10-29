@@ -45,7 +45,8 @@ def get_db() -> sqlite3.Connection:
                    model TEXT,
                    created_at INTEGER NOT NULL,
                    updated_at INTEGER NOT NULL,
-                   messages_json TEXT NOT NULL DEFAULT '[]'
+                   messages_json TEXT NOT NULL DEFAULT '[]',
+                   parent_chat_id TEXT
                )"""
         )
         _conn.execute(
@@ -118,12 +119,13 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "messages": json.loads(row["messages_json"] or "[]"),
+        "parent_chat_id": row["parent_chat_id"] if "parent_chat_id" in row.keys() else None,
     }
 
 
 def _summarize(row: sqlite3.Row) -> dict:
     messages = json.loads(row["messages_json"] or "[]")
-    return {
+    out = {
         "id": row["id"],
         "title": row["title"],
         "model": row["model"],
@@ -131,6 +133,9 @@ def _summarize(row: sqlite3.Row) -> dict:
         "updated_at": row["updated_at"],
         "message_count": len(messages),
     }
+    if row["parent_chat_id"]:
+        out["parent_chat_id"] = row["parent_chat_id"]
+    return out
 
 
 # --- CRUD -----------------------------------------------------------------
@@ -155,7 +160,8 @@ def get_conversation(chat_id: str) -> dict | None:
 
 def create_conversation(title: str | None = None,
                         messages: list | None = None,
-                        model: str | None = None) -> dict:
+                        model: str | None = None,
+                        parent_chat_id: str | None = None) -> dict:
     chat_id = uuid.uuid4().hex
     ts = _now()
     messages = messages or []
@@ -163,9 +169,9 @@ def create_conversation(title: str | None = None,
     title = title or _auto_title(messages)
     with _lock:
         get_db().execute(
-            """INSERT INTO conversations (id, title, model, created_at, updated_at, messages_json)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (chat_id, title, model, ts, ts, json.dumps(messages)),
+            """INSERT INTO conversations (id, title, model, created_at, updated_at, messages_json, parent_chat_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (chat_id, title, model, ts, ts, json.dumps(messages), parent_chat_id),
         )
         get_db().commit()
     result = get_conversation(chat_id)

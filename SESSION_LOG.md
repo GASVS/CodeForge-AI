@@ -78,6 +78,12 @@
 - [✅] **P73C Verified:** `tsc --noEmit` clean; `npm run build` green (429 kB); `npm test` 9/9.
 - [📌] **NEXT:** P7.4 conversation branching.
 
+### Session 2026-10-29 — P7.4 CONVERSATION BRANCHING (backend + frontend, committed)
+- [✅] **P74A Backend** (`src/backend/database.py` + `src/backend/main.py`): added `parent_chat_id` column to `conversations` table; `create_conversation` accepts optional `parent_chat_id`; `_row_to_dict` and `_summarize` include it when present. Added `POST /api/chats/{id}/branch` (`message_index` 0-based inclusive) that clones messages up to the chosen index with fresh IDs, `parent_message_id`, and shared `branch_id`; original chat is unchanged.
+- [✅] **P74B Frontend** (`frontend/src/App.tsx` + `frontend/components/ChatSidebar.tsx`): added `branchFromMessage(messageIndex)` that calls the branch endpoint and switches to the new chat; “Branch here” button on every assistant message; sidebar renders a branch marker (⑂) for chats with `parent_chat_id`.
+- [✅] **P74C Verified:** `tsc --noEmit` clean; `npm run build` green (430 kB); `npm test` 9/9; backend `ast.parse` clean.
+- [📌] **NEXT:** P7.5 token/cost awareness.
+
 ### Session 2026-10-29 — PHASE 7 PLAN ADDED (agentic core, 10 tasks)
 - [✅] **P7A** Added Phase 7 to `docs/ACTION_PLAN.md`: tool-call-aware SSE protocol (7.1), patch/diff generation + apply (7.2), structured findings schema for dead-code actions (7.3), conversation branching (7.4), token/cost awareness (7.5), context auto-summarization (7.6), project-level settings inheritance (7.7), prompt templates / slash commands (7.8), multimodal input plumbing (7.9), git-aware context (7.10). Each task has Steps, Verify, Done-when, and commit line.
 - [✅] **P7B** Updated `ROADMAP.md` §3 Ideas with a Phase 7 pointer so the backlog isn't orphaned.

@@ -1405,6 +1405,47 @@ async def api_delete_chat(chat_id: str):
     return {"ok": True}
 
 
+# P7.4 conversation branching
+class BranchRequest(BaseModel):
+    message_index: int
+
+
+@app.post("/api/chats/{chat_id}/branch")
+async def api_branch_chat(chat_id: str, body: BranchRequest):
+    """Clone a conversation up to `message_index` (0-based, inclusive) into a new chat.
+
+    The new chat contains all messages up to and including `message_index`,
+    cloned with fresh IDs. Every cloned message gains `parent_message_id`
+    (pointing to the original message it was cloned from) and a shared
+    `branch_id`. The original conversation is unchanged.
+    """
+    chat = database.get_conversation(chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    messages = chat.get("messages") or []
+    idx = body.message_index
+    if idx < 0 or idx >= len(messages):
+        raise HTTPException(status_code=422, detail=f"message_index must be between 0 and {len(messages) - 1}")
+
+    branch_id = uuid.uuid4().hex[:12]
+    cloned: list[dict] = []
+    for m in messages[: idx + 1]:
+        new_msg = dict(m)
+        new_msg["id"] = uuid.uuid4().hex[:12]
+        new_msg["parent_message_id"] = m.get("id")
+        new_msg["branch_id"] = branch_id
+        cloned.append(new_msg)
+
+    new_chat = database.create_conversation(
+        title=f"{chat.get('title', 'Chat')} (branch)",
+        messages=cloned,
+        model=chat.get("model"),
+        parent_chat_id=chat_id,
+    )
+    return new_chat
+
+
 @app.get("/api/chats/{chat_id}/export")
 async def api_export_chat(chat_id: str, format: str = "md"):
     if format == "json":

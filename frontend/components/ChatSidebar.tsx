@@ -58,8 +58,15 @@ export default function ChatSidebar({ apiUrl, selectedId, onSelect, onCreate, on
       </div>
       <ul>
         {chatList.map(c => (
-          <li key={c.id} className="px-4 py-2 hover:bg-muted cursor-pointer" style={{ background: c.id===selectedId?'var(--muted)':'' }}>
-            <div onClick={() => onSelect(c.id)}>{c.title || 'Untitled'}</div>
+          <li key={c.id} className={`px-4 py-2 hover:bg-muted cursor-pointer ${c.id === selectedId ? 'bg-muted' : ''}`}>
+            <div onClick={() => onSelect(c.id)} className="flex items-center gap-2">
+              {'parent_chat_id' in c && c.parent_chat_id ? (
+                <span className="text-xs opacity-50" title={`Branched from ${c.parent_chat_id}`}>⑂</span>
+              ) : (
+                <span className="text-xs opacity-30">•</span>
+              )}
+              <span className="flex-1 truncate">{c.title || 'Untitled'}</span>
+            </div>
             <button onClick={() => handleDelete(c.id)} className="text-sm text-red-500">x</button>
           </li>
         ))}

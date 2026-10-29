@@ -399,6 +399,35 @@ function App() {
     });
   };
 
+  // P7.4: branch the conversation at a given assistant message index
+  const branchFromMessage = async (messageIndex: number) => {
+    if (!currentChatId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/chats/${currentChatId}/branch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_index: messageIndex }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data && data.detail ? data.detail : `HTTP ${res.status}`);
+      }
+      const newChat = await res.json();
+      setCurrentChatId(newChat.id);
+      setMessages(
+        (newChat.messages || []).map((m: any, i: number) => ({
+          id: `${newChat.id}-${i}`,
+          content: m.content || '',
+          role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+          timestamp: new Date(),
+        }))
+      );
+      loadChatList();
+    } catch (e: any) {
+      console.error('Branch failed:', e);
+    }
+  };
+
   const sendMessage = async (content: string) => {
     if (!content.trim() || isLoading) return;
 
@@ -1221,6 +1250,15 @@ function App() {
                     )}
                     <div className={`text-xs mt-2 ${isAssistant ? 'opacity-50' : 'opacity-75'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {isAssistant && currentChatId && (
+                        <button
+                          onClick={() => branchFromMessage(i)}
+                          className="ml-3 underline opacity-70 hover:opacity-100"
+                          title="Branch conversation here"
+                        >
+                          Branch here
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
