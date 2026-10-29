@@ -1078,7 +1078,8 @@ async def chat(request: ChatRequest):
                 prefix, _count = await _rag_context_for_question(pids, request.message)
 
         if not OPENROUTER_API_KEY:  # Default to local Ollama
-            response = await call_ollama(enhanced_message, model_to_use, prefix_context=prefix)
+            ollama = await call_ollama(enhanced_message, model_to_use, prefix_context=prefix)
+            response = ollama.get("content", "") if isinstance(ollama, dict) else ollama
         else:
             response = await call_openrouter(enhanced_message)
         
@@ -1133,7 +1134,17 @@ async def call_ollama(prompt: str, model_name: str, prefix_context: str = "") ->
         result = response.json()
         if result.get("error"):
             raise HTTPException(status_code=502, detail=f"Ollama error: {result['error']}")
-        return result.get("message", {}).get("content", "")
+        message = result.get("message") or {}
+        prompt_tokens = sum(len(json.dumps(m)) // 4 for m in [{"role": "system", "content": _system_prompt()}, {"role": "user", "content": full_prompt}])
+        completion_tokens = len(message.get("content", "") or "") // 4
+        return {
+            "content": message.get("content", ""),
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+        }
 
 
 # P7.1 tool registry — populated by later phases (code indexer, etc.)
@@ -1177,6 +1188,7 @@ async def stream_ollama(
     - [DONE] when complete
     """
     emitted_done = False
+    prompt_tokens = sum(len(json.dumps(m)) // 4 for m in messages)
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             payload = {
@@ -1242,6 +1254,8 @@ async def stream_ollama(
                             return
 
                         emitted_done = True
+                        completion_tokens = len(last_content) // 4
+                        yield f"data: {json.dumps({'type': 'usage', 'usage': {'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens, 'total_tokens': prompt_tokens + completion_tokens}})}\n\n"
                         yield "data: [DONE]\n\n"
                         return
 

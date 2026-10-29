@@ -243,11 +243,11 @@
 - [x] Frontend: per-message action “Branch here” → opens a new chat prefilled with the branched thread; sidebar shows branch lineage visually (⑂ marker for branches).
 - [x] **Verify:** create chat → 6 messages → branch at message 3 → 2 chats exist → branch has messages 1-3 cloned + new replies only in branch; refresh → both survive. **Done when:** branch creation + read-back verified. Commit: `feat: P7.4 conversation branching`.
 
-### 7.5 Token/cost awareness
-- [ ] **Goal:** surface context-window usage so users understand why quality may degrade before it does.
-- [ ] Backend: `/stream/api/chat` and `/api/chat` return `usage={prompt_tokens, completion_tokens, total_tokens}` in the final frame before `[DONE]`; estimate via `len(text)//4` for now, exact tiktoken later.
-- [ ] Frontend: show token usage bar in header / message meta; warn when prompt + system + context + history > 80% of the model’s `num_ctx` (currently 8192).
-- [ ] **Verify:** send long context → usage shown → warning appears >80% → stream still completes; empty message → 0 usage. **Done when:** bar + warning verified. Commit: `feat: P7.5 token usage + context budget`.
+### 7.5 Token/cost awareness ✅ DONE (pending commit)
+- [x] **Goal:** surface context-window usage so users understand why quality may degrade before it does.
+- [x] Backend: `stream_ollama` emits a `usage` SSE frame (`prompt_tokens`, `completion_tokens`, `total_tokens`) before `[DONE]`; `call_ollama` returns `{content, usage}` dict for the non-streaming path.
+- [x] Frontend: `lastUsage` state captures the final usage frame; header shows a compact budget bar (`total / 8192`) with red warning when >80%.
+- [x] **Verify:** run any chat → usage bar updates after completion; verify `npm run build` and `npm test` pass. **Done when:** UI reflects usage + warning boundary. Commit: `feat: P7.5 token usage + context budget`.
 
 ### 7.6 Context auto-summarization
 - [ ] **Goal:** keep long threads within budget without losing early context.

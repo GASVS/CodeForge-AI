@@ -146,6 +146,8 @@ function App() {
   const [patchFeedback, setPatchFeedback] = useState<Record<string, { ok: boolean; message: string }>>({});
   // P7.3 structured findings selection state (per message id → selected finding indices)
   const [findingsSelection, setFindingsSelection] = useState<Record<string, number[]>>({});
+  // P7.5 token usage from the last completed stream
+  const [lastUsage, setLastUsage] = useState<{ prompt_tokens: number; completion_tokens: number; total_tokens: number } | null>(null);
 
   const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8001';
 
@@ -586,6 +588,8 @@ function App() {
             armWatchdog();
             fullContent += data.text;
             setContent(fullContent);
+          } else if (type === 'usage' && data.usage) {
+            setLastUsage(data.usage);
           } else if (type === 'tool_call') {
             armWatchdog();
             setMessages(prev => ([
@@ -957,6 +961,27 @@ function App() {
                 </>
               )}
             </select>
+
+            {/* P7.5 token usage budget */}
+            {lastUsage && (() => {
+              const ctx = 8192;
+              const pct = Math.min(lastUsage.total_tokens / ctx, 1);
+              const warn = pct > 0.8;
+              return (
+                <div className="hidden md:flex items-center gap-2 text-xs opacity-80">
+                  <div className="w-24 h-1.5 rounded-full overflow-hidden border border-current">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${pct * 100}%`, background: warn ? '#f87171' : '#818cf8' }}
+                    />
+                  </div>
+                  <span className={warn ? 'text-rose-500 font-medium' : ''}>
+                    {lastUsage.total_tokens.toLocaleString()} / {ctx.toLocaleString()}
+                  </span>
+                  {warn && <span className="text-rose-500 font-medium">⚠ context nearing limit</span>}
+                </div>
+              );
+            })()}
 
             {/* Theme Toggle */}
             <button

@@ -84,6 +84,12 @@
 - [✅] **P74C Verified:** `tsc --noEmit` clean; `npm run build` green (430 kB); `npm test` 9/9; backend `ast.parse` clean.
 - [📌] **NEXT:** P7.5 token/cost awareness.
 
+### Session 2026-10-29 — P7.5 TOKEN USAGE + CONTEXT BUDGET (backend + frontend)
+- [✅] **P75A Backend** (`src/backend/main.py`): `stream_ollama` estimates prompt tokens from serialized message payload and completion tokens from generated text; emits a `{"type":"usage",...}` SSE frame before `[DONE]`. `call_ollama` returns a dict `{content, usage}` for the non-streaming `/api/chat` path.
+- [✅] **P75B Frontend** (`frontend/src/App.tsx`): added `lastUsage` state, updated `EventSource.onmessage` to parse `type: "usage"`; header renders a compact budget bar (`total / 8192`) with a red warning when usage exceeds 80%.
+- [✅] **P75C Verified:** `tsc --noEmit` clean; `npm run build` green (430 kB); `npm test` 9/9; backend `ast.parse` clean.
+- [📌] **NEXT:** P7.6 context auto-summarization.
+
 ### Session 2026-10-29 — PHASE 7 PLAN ADDED (agentic core, 10 tasks)
 - [✅] **P7A** Added Phase 7 to `docs/ACTION_PLAN.md`: tool-call-aware SSE protocol (7.1), patch/diff generation + apply (7.2), structured findings schema for dead-code actions (7.3), conversation branching (7.4), token/cost awareness (7.5), context auto-summarization (7.6), project-level settings inheritance (7.7), prompt templates / slash commands (7.8), multimodal input plumbing (7.9), git-aware context (7.10). Each task has Steps, Verify, Done-when, and commit line.
 - [✅] **P7B** Updated `ROADMAP.md` §3 Ideas with a Phase 7 pointer so the backlog isn't orphaned.
