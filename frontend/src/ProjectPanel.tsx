@@ -659,6 +659,14 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
           }}
         />
       )}
+      {/* P7.10: git-aware context panel */}
+      {active && (
+        <GitPanel
+          apiUrl={API_URL}
+          projectId={active.id}
+          theme={theme}
+        />
+      )}
 
       {/* File tree */}
       <div className="max-h-64 overflow-y-auto p-2">
@@ -767,6 +775,126 @@ function ProjectSettings({ apiUrl, projectId, theme, onChanged }: {
             />
           </div>
           {saving && <div className="text-xs opacity-50">Saving…</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// P7.10: lightweight git-aware context panel
+function GitPanel({ apiUrl, projectId, theme }: { apiUrl: string; projectId: string; theme: 'dark' | 'light' }) {
+  const [status, setStatus] = useState<{ root: string; files: Array<{ status: string; path: string }> } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [diffPath, setDiffPath] = useState<string | null>(null);
+  const [diff, setDiff] = useState<string>('');
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  const loadStatus = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/git-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || `git-status failed (${res.status})`);
+      }
+      const d = await res.json();
+      setStatus(d);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load git status');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadStatus();
+  }, [apiUrl, projectId]);
+
+  const showDiff = async (path: string) => {
+    setDiffPath(path);
+    setDiffLoading(true);
+    setDiff('');
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/git-diff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || `git-diff failed (${res.status})`);
+      }
+      const d = await res.json();
+      setDiff(d.diff || '');
+    } catch (e) {
+      setDiff(e instanceof Error ? e.message : 'Failed to load diff');
+    } finally {
+      setDiffLoading(false);
+    }
+  };
+
+  const statusColor = (s: string) => {
+    if (s.startsWith('M')) return 'text-amber-600';
+    if (s.startsWith('A')) return 'text-emerald-600';
+    if (s.startsWith('D')) return 'text-rose-600';
+    if (s.startsWith('?')) return 'text-slate-500';
+    return 'opacity-70';
+  };
+
+  return (
+    <div className={`mx-3 mt-3 rounded-lg border ${theme === 'dark' ? 'bg-slate-800/40 border-slate-700' : 'bg-white border-gray-200'}`}>
+      <div className="p-3 border-b border-current opacity-70 text-xs font-medium flex items-center justify-between">
+        <span>Git status</span>
+        <button
+          onClick={loadStatus}
+          className="text-xs underline opacity-70 hover:opacity-100"
+        >
+          Refresh
+        </button>
+      </div>
+      {error && (
+        <div className="p-2 text-xs text-rose-500">{error}</div>
+      )}
+      {loading && (
+        <div className="p-3 text-xs opacity-50">Loading…</div>
+      )}
+      {!loading && status && status.files.length === 0 && (
+        <div className="p-3 text-xs opacity-50">Clean working tree</div>
+      )}
+      {!loading && status && status.files.length > 0 && (
+        <div className="max-h-48 overflow-y-auto">
+          {status.files.map((f, i) => (
+            <button
+              key={`${f.path}-${i}`}
+              onClick={() => showDiff(f.path)}
+              className={`w-full text-left px-3 py-2 text-xs border-b border-current flex items-center gap-2 hover:opacity-100 opacity-80 transition-colors ${theme === 'dark' ? 'border-slate-800' : 'border-gray-100'}`}
+            >
+              <span className={`font-mono w-6 text-center ${statusColor(f.status)}`}>{f.status}</span>
+              <span className="truncate">{f.path}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {diffPath && (
+        <div className="border-t border-current">
+          <div className="p-2 text-xs font-medium opacity-70 flex items-center justify-between">
+            <span className="truncate">Diff: {diffPath}</span>
+            <button
+              onClick={() => { setDiffPath(null); setDiff(''); }}
+              className="text-xs underline opacity-70 hover:opacity-100 ml-2"
+            >
+              Close
+            </button>
+          </div>
+          <pre className={`p-2 text-xs font-mono overflow-x-auto max-h-64 ${theme === 'dark' ? 'bg-slate-950 text-slate-300' : 'bg-gray-50 text-gray-700'}`}>
+            {diffLoading ? 'Loading…' : diff || 'No changes'}
+          </pre>
         </div>
       )}
     </div>
