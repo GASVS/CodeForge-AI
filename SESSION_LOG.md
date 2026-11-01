@@ -106,7 +106,17 @@
 - [✅] **P78A Backend** (`src/backend/database.py` + `src/backend/main.py`): added `skills` table + CRUD helpers (`skill_create`, `skill_get`, `skill_list`); `GET /api/skills`, `GET /api/skills/{name}`, `POST /api/skills` endpoints.
 - [✅] **P78B Frontend** (`frontend/src/App.tsx`): added `skills` state, `loadSkills()`, `insertSkill()`, `showSkillPalette` dropdown in the input bar, and slash command expansion (`/name` + Enter inserts template body).
 - [✅] **P78C Verified:** `tsc --noEmit` clean; `npm run build` green (435 kB); `npm test` 9/9; backend `ast.parse` clean.
-- [📌] **NEXT:** P7.10 git-aware context.
+- [📌] **NEXT:** Phase 7 complete. All 10 tasks (7.1–7.10) implemented and committed.
+
+### Session 2026-10-29 — P7.10 GIT-AWARE CONTEXT (backend + frontend)
+- [✅] **P710A Backend** (`src/backend/main.py`): added `path` column to `projects` table (schema + ALTER TABLE); updated `project_create`/`project_get` to persist/return path; added `POST /api/projects/{id}/git-status` (returns `{root, files:[{status, path}]}`) and `POST /api/projects/{id}/git-diff` (returns `{path, diff}`); helpers `_git_root` + `_run_git` with timeout/error handling; path-traversal guard on diff target.
+- [✅] **P710B Frontend** (`frontend/src/ProjectPanel.tsx`): added `GitPanel` component with file-status list (color-coded M/A/D/?), per-file diff viewer, refresh button, and close button.
+- [✅] **P710C Verified:** `tsc --noEmit` clean; `npm run build` green (440.40 kB); `npm test` 9/9; backend `ast.parse` clean.
+
+### Session 2026-10-29 — CODE REVIEW ROUND 1 (bugs + type safety)
+- [✅] **R1A Backend fixes:** removed duplicate `import os`; fixed inverted orphan-file purge logic (`st_mtime < cutoff`); extracted `ALLOWED_IMAGE_EXTENSIONS` from `ALLOWED_EXTENSIONS`; fixed `_apply_unified_diff` trailing-newline drop; added path-traversal guard in `git-diff`; moved inline `import subprocess` to top-level.
+- [✅] **R1B Frontend fixes:** attached P7.9 image URLs to `userMessage.id` instead of `assistantMsgId`; included `image_urls` in chat create/persist payloads; reset `compressedNote` on send; added `image_urls?: string[]` to `Message` interface and `UploadedFile` interface.
+- [📌] **NEXT:** Phase 7 complete. Backlog: OpenRouter BYOK, Playwright E2E, Postgres option, i18n/a11y.
 
 ### Session 2026-10-29 — P7.9 MULTIMODAL INPUT PLUMBING (backend + frontend)
 - [✅] **P79A Backend** (`src/backend/main.py`): added `FileResponse` + `StaticFiles` imports; mounted `/uploads/` directory for static image serving; extended `ALLOWED_EXTENSIONS` to include png/jpg/jpeg/gif/webp/svg; modified `/api/upload` to accept images, save raw bytes (skip text sniff), return `/uploads/{file_id}_{name}` URLs, and track in `uploaded_files_store`; added `image_urls: Optional[List[str]]` to `ChatRequest`; `stream_chat` parses `image_urls` query param and emits `image` SSE frame via `_stream_with_images` helper before `stream_ollama`; non-streaming `/api/chat` echoes `image_urls` in response.

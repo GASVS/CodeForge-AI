@@ -275,10 +275,10 @@
 - [x] **Verify:** attach a PNG → chat request includes `image_urls` → server accepts → image served at `/uploads/...` → SSE stream emits `image` frame. **Done when:** plumbing accepted end-to-end. Commit: `feat: P7.9 multimodal input plumbing`.
 
 ### 7.10 Git-aware context (lightweight)
-- [ ] **Goal:** let the model answer “what did I change?” and make patches safer.
-- [ ] Backend: run git against the project root when available: `POST /api/projects/{id}/git-status` → modified/untracked/staged; `POST /api/projects/{id}/git-diff` → unified diff of working tree. Both are read-only and bounded.
-- [ ] Frontend: git status panel in the project panel; diff viewer for the selected file.
-- [ ] **Verify:** modify a tracked file → git-status shows modified → git-diff returns unified diff → model can answer “what changed?” from the diff context. **Done when:** status/diff endpoints verified. Commit: `feat: P7.10 git-aware context`.
+- [x] **Goal:** let the model answer “what did I change?” and make patches safer.
+- [x] Backend: run git against the project root when available: `POST /api/projects/{id}/git-status` → modified/untracked/staged; `POST /api/projects/{id}/git-diff` → unified diff of working tree. Both are read-only and bounded.
+- [x] Frontend: git status panel in the project panel; diff viewer for the selected file.
+- [x] **Verify:** modify a tracked file → git-status shows modified → git-diff returns unified diff → model can answer “what changed?” from the diff context. **Done when:** status/diff endpoints verified. Commit: `feat: P7.10 git-aware context`.
 
 ---
 
