@@ -360,7 +360,7 @@ async def delete_file(file_id: str):
 # ---------------------------------------------------------------------------
 
 
-async def _import_project_files(name: str, raw_files: List[dict]) -> dict:
+async def _import_project_files(name: str, raw_files: List[dict], path: str | None = None) -> dict:
     """Store a project from an already-validated raw file list, then build its
     RAG index (P3.2) as best effort — the import itself must never fail because
     the embedding model is down."""
@@ -395,7 +395,7 @@ async def _import_project_files(name: str, raw_files: List[dict]) -> dict:
     if taken:
         raise HTTPException(status_code=409, detail=f"A project named '{name}' already exists")
     try:
-        proj = database.project_create(name, normalized)
+        proj = database.project_create(name, normalized, path=path)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"A project named '{name}' already exists")
     # P3.2: embed the project's files now so the semantic-search endpoints work
@@ -541,7 +541,8 @@ async def create_project(request: Request):
     if "application/json" in ctype:
         payload = await request.json()
         parsed = _validate_json_files(payload)
-        return await _import_project_files(parsed[0]["name"], parsed[0]["files"])
+        path = payload.get("path")
+        return await _import_project_files(parsed[0]["name"], parsed[0]["files"], path=path)
     raise HTTPException(
         status_code=422,
         detail="Import a project: send JSON {name, files:[{path, content}]} or a zip upload",
