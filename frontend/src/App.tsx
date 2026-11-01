@@ -31,6 +31,7 @@ interface UploadedFile {
   id: string;
   filename: string;
   size: number;
+  url?: string; // P7.9: images get a serving URL from /api/upload
 }
 
 interface Message {
@@ -41,6 +42,7 @@ interface Message {
   error?: string; // Phase 4: styled error card instead of inline text
   toolCalls?: Array<{ id: string; name: string; args: any }>;
   toolResults?: Record<string, any>;
+  image_urls?: string[];
 }
 
 function SendIcon() {
@@ -259,7 +261,7 @@ function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: msgs.map(m => ({ role: m.role, content: m.content })),
+          messages: msgs.map(m => ({ role: m.role, content: m.content, image_urls: m.image_urls })),
         }),
       });
       loadChatList();
@@ -483,17 +485,20 @@ function App() {
   const sendMessage = async (content: string) => {
     if (!content.trim() || isLoading) return;
 
+    const attachedImages = pendingImages.slice();
     const userMessage: Message = {
       id: Date.now().toString(),
       content,
       role: 'user',
-      timestamp: new Date()
+      timestamp: new Date(),
+      image_urls: attachedImages.length > 0 ? attachedImages : undefined,
     };
 
     setInput('');
     setIsLoading(true);
     setStreamStarted(false);
     setPendingImages([]);
+    setCompressedNote(null);
 
     const assistantMsgId = (Date.now() + 1).toString();
     const assistantMsg: Message = {
@@ -524,7 +529,7 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model,
-            messages: [{ role: 'user', content }],
+            messages: [{ role: 'user', content, image_urls: attachedImages.length > 0 ? attachedImages : undefined }],
           }),
         });
         const created = await res.json();
@@ -637,9 +642,9 @@ function App() {
           const type = data.type || 'text';
 
           if (type === 'image') {
-            // P7.9: render attached images as part of the message
+            // P7.9: render attached images as part of the user message
             setMessages(prev => prev.map(msg =>
-              msg.id === assistantMsgId
+              msg.id === userMessage.id
                 ? { ...msg, image_urls: (msg as any).image_urls ? (msg as any).image_urls.concat(data.urls) : data.urls }
                 : msg
             ));
@@ -1223,14 +1228,6 @@ function App() {
                         >
                           {msg.content}
                         </ReactMarkdown>
-                        {/* P7.9: render attached images */}
-                        {(msg as any).image_urls && (msg as any).image_urls.length > 0 && (
-                          <div className="mt-3 flex gap-2 flex-wrap">
-                            {(msg as any).image_urls.map((url: string) => (
-                              <img key={url} src={`${API_URL}${url}`} alt="" className="max-h-64 rounded-lg border border-gray-300 dark:border-slate-700 object-contain" />
-                            ))}
-                          </div>
-                        )}
                         {/* P7.1 tool-call cards */}
                         {msg.toolCalls && msg.toolCalls.length > 0 && (
                           <div className="mt-3 space-y-2">
@@ -1353,6 +1350,14 @@ function App() {
                       </div>
                     ) : (
                       <div className="whitespace-pre-wrap">{msg.content}</div>
+                    )}
+                    {/* P7.9: render attached images for both user and assistant messages */}
+                    {(msg as any).image_urls && (msg as any).image_urls.length > 0 && (
+                      <div className="mt-3 flex gap-2 flex-wrap">
+                        {(msg as any).image_urls.map((url: string) => (
+                          <img key={url} src={`${API_URL}${url}`} alt="" className="max-h-64 rounded-lg border border-gray-300 dark:border-slate-700 object-contain" />
+                        ))}
+                      </div>
                     )}
                     <div className={`text-xs mt-2 ${isAssistant ? 'opacity-50' : 'opacity-75'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

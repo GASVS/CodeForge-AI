@@ -18,6 +18,7 @@ import time
 import io
 import math
 import zipfile
+import subprocess
 import sqlite3
 import numpy as np
 from typing import Optional, AsyncGenerator, List
@@ -25,7 +26,6 @@ import json
 import uuid
 import shutil
 import sys
-import os
 import asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 import database
@@ -97,19 +97,18 @@ ALLOWED_EXTENSIONS = {
     "cs", "php", "sh", "bash", "zsh", "ps1",
     "html", "css", "scss", "vue", "svelte",
     "json", "yml", "yaml", "toml", "xml", "sql", "md", "txt", "csv", "ini", "env",
-    # P7.9 multimodal input: allow image attachments (plumbing only, no model change yet)
-    "png", "jpg", "jpeg", "gif", "webp", "svg",
 }
+ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp", "svg"}  # P7.9 multimodal only
 
 
 def _allowed_code_filename(filename: str) -> Optional[str]:
-    """Return a sanitized basename if the extension is code/text, else None."""
+    """Return a sanitized basename if the extension is code/text or image, else None."""
     base = filename.replace("\\", "/").rsplit("/", 1)[-1]  # strip any path
     base = base.replace("\x00", "").strip()
     if not base or base in (".", ".."):
         return None
     ext = base.rsplit(".", 1)[-1].lower() if "." in base else ""
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext not in ALLOWED_EXTENSIONS and ext not in ALLOWED_IMAGE_EXTENSIONS:
         return None
     return base
 
@@ -136,7 +135,7 @@ async def lifespan(app: FastAPI):
         # orphan on-disk files (no DB row) beyond the retention window
         for entry in os.scandir(UPLOAD_DIR):
             try:
-                if time.time_ns() // 1_000_000_000 < cutoff and entry.is_file():
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
                     os.remove(entry.path)
             except OSError:
                 pass
@@ -237,7 +236,7 @@ async def upload_file(files: List[UploadFile] = File(...)):
             )
 
         ext = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
-        is_image = ext in {"png", "jpg", "jpeg", "gif", "webp", "svg"}
+        is_image = ext in ALLOWED_IMAGE_EXTENSIONS
 
         file_id = str(uuid.uuid4())[:8]
         file_path = os.path.join(UPLOAD_DIR, f"{file_id}_{safe_name}")
@@ -568,6 +567,83 @@ async def delete_project_endpoint(project_id: str):
     if not database.project_delete(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     return {"ok": True}
+
+
+# P7.10 git-aware context (lightweight, read-only)
+async def _git_root(project_id: str) -> str | None:
+    proj = database.project_get(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return proj.get("path")
+
+
+def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
+    try:
+        result = subprocess.run(
+            ["git"] + args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode, result.stdout, result.stderr
+    except FileNotFoundError:
+        return 127, "", "git not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", "git timed out"
+
+
+class GitStatusRequest(BaseModel):
+    paths: Optional[List[str]] = None  # optional file filter
+
+
+@app.post("/api/projects/{project_id}/git-status")
+async def project_git_status(project_id: str, request: GitStatusRequest):
+    root = await _git_root(project_id)
+    if not root:
+        raise HTTPException(status_code=400, detail="Project has no git root path")
+
+    code, out, err = _run_git(["status", "--porcelain", "--untracked-files=all"], root)
+    if code == 127:
+        raise HTTPException(status_code=501, detail="git is not available")
+    if code != 0:
+        raise HTTPException(status_code=500, detail=f"git status failed: {err.strip()[:200]}")
+
+    files: list[dict] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        status = line[:2]
+        path = line[3:]
+        files.append({"status": status.strip(), "path": path})
+
+    return {"root": root, "files": files}
+
+
+class GitDiffRequest(BaseModel):
+    path: str
+
+
+@app.post("/api/projects/{project_id}/git-diff")
+async def project_git_diff(project_id: str, request: GitDiffRequest):
+    root = await _git_root(project_id)
+    if not root:
+        raise HTTPException(status_code=400, detail="Project has no git root path")
+
+    target = os.path.join(root, request.path)
+    # P7.10: prevent path traversal — the resolved path must stay inside root
+    if not os.path.abspath(target).startswith(os.path.abspath(root)):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+    if not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    code, out, err = _run_git(["diff", "--no-color", "--", target], root)
+    if code == 127:
+        raise HTTPException(status_code=501, detail="git is not available")
+    if code not in (0, 1):  # 1 = differences found (normal)
+        raise HTTPException(status_code=500, detail=f"git diff failed: {err.strip()[:200]}")
+
+    return {"path": request.path, "diff": out}
 
 
 @app.get("/api/projects/{project_id}/files/{file_id}")
@@ -939,7 +1015,7 @@ def _apply_unified_diff(original: str, diff_text: str) -> str:
             else:
                 replacements.append(b + '\n')
 
-        out[old_start_0:old_end] = [r if r.endswith('\n') else r for r in replacements]
+        out[old_start_0:old_end] = [r if r.endswith('\n') else r + '\n' for r in replacements]
 
     return ''.join(out)
 

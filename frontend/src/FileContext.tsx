@@ -6,6 +6,7 @@ interface UploadedFile {
   id: string;
   filename: string;
   size: number;
+  url?: string; // P7.9: images get a serving URL from /api/upload
 }
 
 interface Props {
