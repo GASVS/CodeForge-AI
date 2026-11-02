@@ -128,6 +128,9 @@ function App() {
   // open the projects panel and THEN focus its search box — focus happens in
   // this effect after the panel has committed to the DOM.
   const searchFocusArmed = useRef(false);
+  // P7.13 Command Palette (Cmd+K)
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState('');
   // P3.2 RAG mode: when set, chat sends `project_ids=<id>` instead of the
   // selected-file concat — the backend picks the top relevant chunks for the
   // question. Toggled from ProjectPanel; cleared when the active project is
@@ -167,6 +170,29 @@ function App() {
     setShowSkillPalette(false);
     inputRef.current?.focus();
   };
+
+  // P7.13 Command Palette actions
+  interface Command {
+    id: string;
+    label: string;
+    shortcut?: string;
+    action: () => void;
+  }
+  const COMMANDS: Command[] = [
+    { id: 'new-chat', label: 'New chat', shortcut: '⌘N', action: async () => {
+      const res = await fetch(`${API_URL}/api/chats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'New chat' }) });
+      const newChat = await res.json();
+      handleCreateChat(newChat.id);
+    }},
+    { id: 'clear-chat', label: 'Clear chat', action: () => { setMessages([]); } },
+    { id: 'export-md', label: 'Export chat as Markdown', action: () => handleExportChat('md') },
+    { id: 'export-json', label: 'Export chat as JSON', action: () => handleExportChat('json') },
+    { id: 'toggle-theme', label: 'Toggle theme', shortcut: '⌘T', action: () => setTheme(t => t === 'dark' ? 'light' : 'dark') },
+    { id: 'toggle-sidebar', label: 'Toggle chat history', shortcut: '⌘H', action: () => setShowSidebar(s => !s) },
+    { id: 'toggle-logs', label: 'Toggle runtime logs', action: () => setShowLogs(s => !s) },
+    { id: 'open-settings', label: 'Open settings', shortcut: '⌘,', action: () => setShowSettings(true) },
+    { id: 'toggle-projects', label: 'Toggle project panel', shortcut: '⌘P', action: () => setContextTab(t => t === 'projects' ? null : 'projects') },
+  ];
 
   // P7.9 multimodal input: pending image URLs attached to the next message
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -364,18 +390,8 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
-        const focusSearch = () => {
-          const el = document.querySelector<HTMLInputElement>('[data-codeforge-search]');
-          el?.focus();
-          el?.select();
-        };
-        if (contextTab === 'projects') {
-          // already open → focus immediately
-          focusSearch();
-        } else {
-          searchFocusArmed.current = true;
-          setContextTab('projects');
-        }
+        setShowCommandPalette(true);
+        setCommandPaletteQuery('');
         return;
       }
     };
@@ -897,6 +913,57 @@ function App() {
 
   return (
     <div className={`min-h-screen ${containerBg} ${textColor} flex`}>
+      {/* Command Palette (Cmd+K) */}
+      {showCommandPalette && (
+        <div
+          className="fixed inset-0 z-[60] flex items-start justify-center pt-[20vh]"
+          onClick={() => setShowCommandPalette(false)}
+        >
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className={`relative w-full max-w-xl rounded-xl shadow-2xl border overflow-hidden ${
+              theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-gray-200'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              autoFocus
+              value={commandPaletteQuery}
+              onChange={(e) => setCommandPaletteQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setShowCommandPalette(false);
+              }}
+              placeholder="Type a command…"
+              className={`w-full px-4 py-3 text-sm outline-none ${
+                theme === 'dark' ? 'bg-slate-900 text-slate-100 placeholder:text-slate-500' : 'bg-white text-gray-900 placeholder:text-gray-400'
+              }`}
+            />
+            <div className="max-h-64 overflow-y-auto border-t border-slate-800">
+              {COMMANDS.filter(c => c.label.toLowerCase().includes(commandPaletteQuery.toLowerCase())).map((cmd, idx) => (
+                <button
+                  key={cmd.id}
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-slate-800 transition-colors ${
+                    theme === 'dark' ? 'text-slate-200' : 'text-gray-800'
+                  }`}
+                  onClick={() => {
+                    cmd.action();
+                    setShowCommandPalette(false);
+                  }}
+                >
+                  <span>{cmd.label}</span>
+                  {cmd.shortcut && (
+                    <span className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'}`}>{cmd.shortcut}</span>
+                  )}
+                </button>
+              ))}
+              {COMMANDS.filter(c => c.label.toLowerCase().includes(commandPaletteQuery.toLowerCase())).length === 0 && (
+                <div className={`px-4 py-3 text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'}`}>No commands match.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Chat History — popup (like Settings): overlay, zero inline footprint when closed */}
       {showSidebar && (
         <>

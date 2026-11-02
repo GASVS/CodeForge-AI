@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8001';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+// Hermes-managed Python has uvicorn + app deps available
+const PLAYWRIGHT_PYTHON = process.env.PLAYWRIGHT_PYTHON || 'python3';
+const BACKEND_COMMAND = process.env.PLAYWRIGHT_BACKEND_COMMAND || `bash scripts/start-backend.sh`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -22,9 +25,13 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'python3 -m uvicorn src.backend.main:app --host 0.0.0.0 --port 8001',
+      command: BACKEND_COMMAND,
       url: BACKEND_URL + '/',
       reuseExistingServer: !process.env.CI,
+      env: {
+        ...process.env,
+        TMPDIR: process.env.TMPDIR || '/Users/andrejgorskolepov/.hermes/cache/scratch',
+      },
     },
     {
       command: 'npm run dev -- --port 3000',

@@ -28,4 +28,15 @@ test.describe('Jev Dashboard E2E', () => {
     const attachBtn = page.locator('button[title*="Attach"]').first();
     await expect(attachBtn).toBeVisible();
   });
+
+  test('command palette opens on Cmd+K', async ({ page }) => {
+    await page.goto('/');
+    // Wait for the app to hydrate before sending the shortcut
+    await page.waitForSelector('textarea[placeholder*="Type your message"], textarea', { timeout: 10000 });
+    await page.keyboard.press('Control+k');
+    const palette = page.locator('input[placeholder="Type a command…"]').first();
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).not.toBeVisible();
+  });
 });

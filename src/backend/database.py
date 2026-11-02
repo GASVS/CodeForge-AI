@@ -65,7 +65,8 @@ def get_db() -> sqlite3.Connection:
                    name TEXT NOT NULL,
                    file_count INTEGER NOT NULL DEFAULT 0,
                    total_bytes INTEGER NOT NULL DEFAULT 0,
-                   created_at INTEGER NOT NULL
+                   created_at INTEGER NOT NULL,
+                   path TEXT
                )"""
         )
         _conn.execute(
@@ -121,6 +122,7 @@ def get_db() -> sqlite3.Connection:
                    updated_at INTEGER
                )"""
         )
+        _conn.execute("ALTER TABLE projects ADD COLUMN path TEXT")
         _conn.commit()
     return _conn
 
@@ -151,8 +153,12 @@ def _summarize(row: sqlite3.Row) -> dict:
         "updated_at": row["updated_at"],
         "message_count": len(messages),
     }
-    if row["parent_chat_id"]:
-        out["parent_chat_id"] = row["parent_chat_id"]
+    try:
+        parent = row["parent_chat_id"]
+    except (IndexError, KeyError):
+        parent = None
+    if parent:
+        out["parent_chat_id"] = parent
     return out
 
 
@@ -343,15 +349,15 @@ MAX_PROJECT_FILE_BYTES = 2 * 1024 * 1024  # per-file import cap (same as uploads
 MAX_PROJECT_FILES = 500                  # hard cap per project (perf guard)
 
 
-def project_create(name: str, files: list[dict]) -> dict:
+def project_create(name: str, files: list[dict], path: str | None = None) -> dict:
     """Store a project + its allowed files. files: [{path, size, content}]"""
     pid = uuid.uuid4().hex[:12]
     ts = _now()
     with _lock:
         conn = get_db()
         conn.execute(
-            "INSERT INTO projects (id, name, file_count, total_bytes, created_at) VALUES (?,?,?,?,?)",
-            (pid, name, len(files), sum(f["size"] for f in files), ts),
+            "INSERT INTO projects (id, name, file_count, total_bytes, created_at, path) VALUES (?,?,?,?,?,?)",
+            (pid, name, len(files), sum(f["size"] for f in files), ts, path),
         )
         rows = [
             (uuid.uuid4().hex[:12], pid, f["path"], f.get("size", len(f["content"])),
@@ -377,6 +383,7 @@ def project_get(project_id: str) -> dict | None:
         "file_count": row["file_count"],
         "total_bytes": row["total_bytes"],
         "created_at": row["created_at"],
+        "path": row["path"],
         "files": project_files_list(project_id),
     }
 
