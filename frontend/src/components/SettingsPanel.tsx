@@ -32,6 +32,7 @@ export default function SettingsPanel({
   const [status, setStatus] = useState<OllamaStatus | null>(null);
   const [temperature, setTemperature] = useState(0.7);
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [openrouterKey, setOpenrouterKey] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
 
   const dark = theme === 'dark';
@@ -47,6 +48,7 @@ export default function SettingsPanel({
         const d = await res.json();
         setTemperature(d.temperature);
         setSystemPrompt(d.system_prompt || '');
+        setOpenrouterKey(d.openrouter_api_key || '');
       } catch {
         /* defaults stay */
       }
@@ -63,7 +65,7 @@ export default function SettingsPanel({
     }
   }
 
-  async function save(partial: { temperature?: number; system_prompt?: string }) {
+  async function save(partial: { temperature?: number; system_prompt?: string; openrouter_api_key?: string }) {
     try {
       const res = await fetch(`${apiUrl}/api/settings`, {
         method: 'PUT',
@@ -202,23 +204,28 @@ export default function SettingsPanel({
         </div>
       </div>
 
-      {/* OpenRouter — coming in v1.1 (don't ship a dead control) */}
-      <div className="opacity-60">
+      {/* OpenRouter BYOK (P7.12) */}
+      <div>
         <div className="flex items-center justify-between">
-          <label className={`block text-sm font-medium ${dark ? 'text-slate-400' : 'text-gray-500'}`}>
-            OpenRouter (cloud)
+          <label className={`block text-sm font-medium ${dark ? 'text-slate-300' : 'text-gray-600'}`}>
+            OpenRouter API key
           </label>
-          <span className={`text-xs rounded px-2 py-1 ${dark ? 'bg-slate-800 text-slate-400' : 'bg-gray-100 text-gray-500'}`}>
-            coming in v1.1
-          </span>
+          {openrouterKey && (
+            <span className="text-xs rounded px-2 py-1 bg-emerald-800 text-emerald-300">connected</span>
+          )}
         </div>
         <input
-          type="text"
-          placeholder="API key (v1.1)"
-          disabled
+          type="password"
+          placeholder="sk-or-..."
+          value={openrouterKey}
+          onChange={(e) => setOpenrouterKey(e.target.value)}
+          onBlur={() => save({ openrouter_api_key: openrouterKey })}
           className={`${fieldCls} mt-1`}
-          aria-label="OpenRouter API key (coming in v1.1)"
+          aria-label="OpenRouter API key"
         />
+        <div className={`text-xs ${dark ? 'text-slate-500' : 'text-gray-400'}`}>
+          When set, cloud models take priority over local Ollama.
+        </div>
       </div>
 
       {/* Theme + save feedback */}

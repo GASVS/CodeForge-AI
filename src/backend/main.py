@@ -1097,6 +1097,10 @@ def _temperature() -> float:
     return max(0.0, min(1.0, v))
 
 
+def _openrouter_api_key() -> str:
+    return (database.setting_get("openrouter_api_key", "") or "").strip()
+
+
 def _system_prompt_for_project(project_id: str | None = None) -> str:
     if not project_id:
         return _system_prompt()
@@ -1127,14 +1131,18 @@ def _ollama_options(project_id: str | None = None) -> dict:
 class SettingsUpdate(BaseModel):
     temperature: Optional[float] = None
     system_prompt: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
 
 
 @app.get("/api/settings")
 async def api_get_settings():
     """Current assistant settings (defaults applied for absent keys)."""
+    key = database.setting_get("openrouter_api_key", "")
+    masked = (key[:8] + "..." + key[-4:]) if key and len(key) > 12 else ("***" if key else "")
     return {
         "temperature": _temperature(),
         "system_prompt": _system_prompt(),
+        "openrouter_api_key": masked,
     }
 
 
@@ -1159,6 +1167,9 @@ async def api_update_settings(body: SettingsUpdate):
             raise HTTPException(status_code=422, detail="system_prompt too long (max 4000 chars)")
         database.setting_set("system_prompt", sp)
         updates["system_prompt"] = sp
+    if body.openrouter_api_key is not None:
+        database.setting_set("openrouter_api_key", body.openrouter_api_key.strip())
+        updates["openrouter_api_key"] = ("***" if body.openrouter_api_key.strip() else "")
     return {"ok": True, "updated": list(updates), **(await api_get_settings())}
 
 
@@ -1534,9 +1545,15 @@ async def _stream_with_images(
     project_id: str | None = None,
     image_urls: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Wrap `stream_ollama` and prepend an `image` SSE frame when URLs are present."""
+    """Route to OpenRouter when an API key is configured, otherwise Ollama."""
     if image_urls:
         yield f"data: {json.dumps({'type': 'image', 'urls': image_urls})}\n\n"
+
+    if _openrouter_api_key():
+        async for frame in stream_openrouter(messages, model_name, tools=tools, max_tool_rounds=max_tool_rounds, project_id=project_id):
+            yield frame
+        return
+
     async for frame in stream_ollama(messages, model_name, tools=tools, max_tool_rounds=max_tool_rounds, project_id=project_id):
         yield frame
 
@@ -1629,11 +1646,115 @@ async def stream_chat(
 
 
 async def call_openrouter(prompt: str) -> str:
-    """OpenRouter is not shipped in v1.0 — fail cleanly instead of raising raw."""
-    raise HTTPException(
-        status_code=501,
-        detail="OpenRouter support coming in v1.1 — unset OPENROUTER_API_KEY to use your local Ollama models",
-    )
+    """Call OpenRouter chat-completions API (non-streaming) for the
+    configured model. Uses the API key from the settings store."""
+    api_key = _openrouter_api_key()
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenRouter API key not configured. Set it in Settings."
+        )
+    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": _system_prompt()},
+                    {"role": "user", "content": prompt},
+                ],
+            },
+        )
+        if response.status_code == 401:
+            raise HTTPException(status_code=401, detail="OpenRouter: invalid API key")
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def stream_openrouter(
+    messages: list[dict],
+    model_name: str,
+    tools: list[dict] | None = None,
+    max_tool_rounds: int = 5,
+    project_id: str | None = None,
+) -> AsyncGenerator[str, None]:
+    """Stream responses from OpenRouter chat-completions API.
+
+    Emits typed SSE frames compatible with the existing frontend parser.
+    """
+    api_key = _openrouter_api_key()
+    if not api_key:
+        yield f"data: {json.dumps({'type': 'error', 'error': 'OpenRouter API key not configured. Set it in Settings.'})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    model = model_name or os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    emitted_done = False
+    prompt_tokens = sum(len(json.dumps(m)) // 4 for m in messages)
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
+            }
+            if tools:
+                payload["tools"] = tools
+
+            async with client.stream(
+                "POST",
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            ) as response:
+                if response.status_code == 401:
+                    yield f"data: {json.dumps({'type': 'error', 'error': 'OpenRouter: invalid API key'})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                response.raise_for_status()
+
+                last_content = ""
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload_str = line[len("data: "):].strip()
+                    if payload_str == "[DONE]":
+                        completion_tokens = len(last_content) // 4
+                        yield f"data: {json.dumps({'type': 'usage', 'usage': {'prompt_tokens': prompt_tokens, 'completion_tokens': completion_tokens, 'total_tokens': prompt_tokens + completion_tokens}})}\n\n"
+                        yield "data: [DONE]\n\n"
+                        emitted_done = True
+                        return
+
+                    try:
+                        data = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    choice = (data.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    content = delta.get("content", "") or ""
+                    if len(content) > len(last_content):
+                        delta_text = content[len(last_content):]
+                        yield f"data: {json.dumps({'type': 'text', 'text': delta_text})}\n\n"
+                        last_content = content
+
+    except httpx.HTTPStatusError as e:
+        yield f"data: {json.dumps({'type': 'error', 'error': f'OpenRouter HTTP {e.response.status_code}: {e.response.text[:200]}'})}\n\n"
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    if not emitted_done:
+        yield "data: [DONE]\n\n"
 
 
 @app.get("/api/models")

@@ -118,6 +118,25 @@
 - [✅] **R1B Frontend fixes:** attached P7.9 image URLs to `userMessage.id` instead of `assistantMsgId`; included `image_urls` in chat create/persist payloads; reset `compressedNote` on send; added `image_urls?: string[]` to `Message` interface and `UploadedFile` interface.
 - [📌] **NEXT:** Phase 7 complete. Backlog: OpenRouter BYOK, Playwright E2E, Postgres option, i18n/a11y.
 
+### Session 2026-10-29 — P7.11 PLAYWRIGHT E2E SMOKE TESTS
+- [✅] **P7.11A Installed** `@playwright/test` + Chromium browser.
+- [✅] **P7.11B Config** `frontend/playwright.config.ts`: starts backend (`uvicorn src.backend.main:app --port 8001`) + frontend dev server (`npm run dev -- --port 3000`); reuse-existing unless CI.
+- [✅] **P7.11C Smoke suite** `frontend/tests/e2e/smoke.spec.ts`: 5 tests — title, `/health`, chat input visible, project panel rendered, attach buttons visible.
+- [✅] **P7.11D Verified:** `npm run test:e2e` → 5 passed (Chromium, ~1.6s, webServer boot).
+- [✅] **P7.11E Committed:** `2e7ab89`.
+
+### Session 2026-10-29 — P7.12 OPENROUTER BYOK
+- [✅] **P7.12A Backend settings:** added `openrouter_api_key` field to `SettingsUpdate` + `api_get_settings` (masked return) + `api_update_settings` (persisted via `database.setting_set`).
+- [✅] **P7.12B Backend helper:** `_openrouter_api_key()` reads persisted key from settings store.
+- [✅] **P7.12C Real `call_openrouter`** (non-streaming): calls `https://openrouter.ai/api/v1/chat/completions`, handles 401, returns content.
+- [✅] **P7.12D Real `stream_openrouter`** (SSE): emits typed frames (`text`, `error`, `[DONE]`, `usage`) compatible with existing frontend parser; 401 → error frame; fallback to `[DONE]` on any exception.
+- [✅] **P7.12E Routing:** `_stream_with_images` checks `_openrouter_api_key()` — when set, routes to `stream_openrouter` instead of `stream_ollama`.
+- [✅] **P7.12F Frontend SettingsPanel:** enabled OpenRouter API key input (`type="password"`, saves on blur, shows "connected" badge when set), loads masked key on mount.
+- [✅] **P7.12G Verified:** `tsc --noEmit` clean; `npm run build` green (440.40 kB); `npm test` 9/9; backend `ast.parse` clean.
+- [📌] **NEXT:** Commit P7.12, then continue with remaining backlog (GitHub OAuth, Terminal, Command palette, Multi-user, Postgres, i18n/a11y).
+
+---
+
 ### Session 2026-10-29 — P7.9 MULTIMODAL INPUT PLUMBING (backend + frontend)
 - [✅] **P79A Backend** (`src/backend/main.py`): added `FileResponse` + `StaticFiles` imports; mounted `/uploads/` directory for static image serving; extended `ALLOWED_EXTENSIONS` to include png/jpg/jpeg/gif/webp/svg; modified `/api/upload` to accept images, save raw bytes (skip text sniff), return `/uploads/{file_id}_{name}` URLs, and track in `uploaded_files_store`; added `image_urls: Optional[List[str]]` to `ChatRequest`; `stream_chat` parses `image_urls` query param and emits `image` SSE frame via `_stream_with_images` helper before `stream_ollama`; non-streaming `/api/chat` echoes `image_urls` in response.
 - [✅] **P79B Frontend** (`frontend/src/App.tsx`): added `pendingImages` state + `uploadImages()` + `removePendingImage()`; paperclip upload button in input bar; paste handler intercepts image clips; drag/drop handler on textarea; pending image thumbnails with remove (×) buttons; `image_urls` included in SSE stream params; `image` SSE frame handler appends URLs to assistant message; images rendered in message bubbles; `pendingImages` cleared on send.

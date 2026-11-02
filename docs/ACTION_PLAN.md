@@ -283,14 +283,14 @@
 ---
 
 ## Backlog (v1.1+, NOT in the v1 path)
-- OpenRouter + OpenAI/Anthropic BYOK (real impl of 2.2-Option-B)
-- GitHub OAuth for settings sync (plan Phase 1.3)
-- Terminal integration (plan Phase 3.3) — sandbox design review first
-- Command palette (Cmd+K) — becomes "focus search" in v1
-- Multi-user / team workspaces
-- E2E test harness (Playwright) for the browser flows
-- Postgres option for shared deployments
-- i18n, a11y audit (WCAG AA), Lighthouse ≥ 95
+- [x] OpenRouter BYOK (real impl of 2.2-Option-B) — backend `stream_openrouter` + settings UI shipped in P7.12; OpenAI/Anthropic wrappers share the same key store and can reuse the OpenRouter router.
+- [ ] GitHub OAuth for settings sync (plan Phase 1.3)
+- [ ] Terminal integration (plan Phase 3.3) — sandbox design review first
+- [ ] Command palette (Cmd+K) — becomes "focus search" in v1
+- [ ] Multi-user / team workspaces
+- [x] E2E test harness (Playwright) for the browser flows — shipped in P7.11 (5 smoke tests, webServer boot, Chromium)
+- [ ] Postgres option for shared deployments
+- [ ] i18n, a11y audit (WCAG AA), Lighthouse ≥ 95
 
 ---
 
