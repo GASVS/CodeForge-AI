@@ -270,3 +270,10 @@
 - **venv path**: from `src/backend/` it is `../../venv` (project root) — use the absolute path `/home/andrej/Desktop/App/jev-opensource-dashboard/venv/bin/python`.
 - **Qwen 3.8 "thinking" models**: Ollama streams reasoning into the `thinking` JSON field with empty `response` for 30–60s before the answer starts. A naive SSE reader that stops early (or a tight timeout) gets an all-empty stream. Frontend must wait / have a long timeout. (Consider showing a "thinking…" indicator.)
 - Frontend is **Vite/React**, not Next.js: no `process.env.NEXT_PUBLIC_*`; use `import.meta.env`. The old `frontend/app/` (Next pages) tree is DEAD CODE — the live entry is `src/main.tsx → src/App.tsx`.
+
+### Session 2026-10-29 — P7.13 COMMAND PALETTE (Cmd/Ctrl+K)
+- [✅] **P7.13A Frontend state:** added `showCommandPalette` + `commandPaletteQuery` in `App.tsx`.
+- [✅] **P7.13B COMMANDS array:** 9 actions (New chat, Clear, Export md/json, Toggle theme/sidebar/logs/settings/projects).
+- [✅] **P7.13C Keyboard hook:** replaced old Cmd+K focus-search behavior with palette open; Esc closes palette.
+- [✅] **P7.13D Overlay UI:** modal palette with filter + keyboard navigation + empty state.
+- [✅] **P7.13E Verified:** `tsc --noEmit` clean; `npm run build` green (442.60 kB); `npm test` 9/9; Playwright 6/6 smoke tests pass (including Cmd+K palette test).
