@@ -1,4 +1,4 @@
-# Contributing to Jev Open Source Dashboard
+# Contributing to CodeForge AI
 
 Thank you for your interest in helping build a free, privacy-first alternative to proprietary AI coding assistants!
 
@@ -6,8 +6,8 @@ Thank you for your interest in helping build a free, privacy-first alternative t
 
 ```bash
 # Clone repo
-git clone https://github.com/YOUR-USERNAME/codeforge-ai.git
-cd codeforge-ai
+git clone https://github.com/GASVS/CodeForge-AI.git
+cd CodeForge-AI
 
 # Install dependencies
 python3 -m venv venv
@@ -19,7 +19,7 @@ npm install
 
 # Setup Ollama
 curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull qwen3.5:9b  # or any model you prefer
+ollama pull qwen2.5:7b  # or any chat model you prefer
 
 # Start services
 ./start.sh
@@ -81,6 +81,17 @@ Use: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 - Components should be small and focused
 
 ### Testing
+
+Run the gates before opening a PR:
+
+```bash
+# Backend (isolated temp DB; most suites need no Ollama)
+venv/bin/python -m pytest src/backend/tests -q
+
+# Frontend: types, build, unit tests
+cd frontend && npx tsc --noEmit && npm run build && npm test
+```
+
 - Write tests for new features when possible
 - Test with multiple model sizes (9B vs 27B)
 - Verify offline/local mode works
@@ -99,9 +110,8 @@ Use: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 ## 💬 Questions?
 
-- Join our Discord server (TBA at launch)
 - Open a discussion thread on GitHub
-- Email: your.email@example.com
+- Join our Discord server (TBA at launch)
 
 ---
 

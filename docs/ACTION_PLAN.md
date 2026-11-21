@@ -173,9 +173,9 @@
 ## Phase 5 — Docs + launch (v1.0)
 
 ### 5.1 Docs pass
-- [ ] `README.md` rewrite (public): 1-line pitch · screenshot/GIF · 3-command quick start (install Ollama + model, `./start.sh`, open :3000) · feature table · architecture mini-diagram · security/privacy section (local-first, what's stored where: SQLite + `~/.cache` uploads) · roadmap (link ACTION_PLAN) · license (MIT — verify LICENSE header name).
-- [ ] `docs/QUICKSTART.md` + `CONTRIBUTING.md` still accurate against final tree.
-- [ ] Delete/archive stale state files: `mvp_report.md`, `project_status_resume.md`, `WEEK1_COMPLETE.md`, `WEEK2_COMPLETE.md`, `day1_progress.md`, `week1_checklist.md`, `week2_progress.md` → move to `docs/archive/` (history stays in git + SESSION_LOG).
+- [x] `README.md` rewrite (public): 1-line pitch · screenshot/GIF · 3-command quick start (install Ollama + model, `./start.sh`, open :3000) · feature table · architecture mini-diagram · security/privacy section (local-first, what's stored where: SQLite + `~/.cache` uploads) · roadmap (link ACTION_PLAN) · license (MIT — verify LICENSE header name). ✅ DONE 2026-11-21 (P5.1) — full rewrite (old file was the pre-launch planning doc); storage paths verified against code (`private/runtime/codeforge.db`, `UPLOAD_DIR` default `/tmp/jev-uploads`); LICENSE header = "CodeForge AI Contributors" ✓; screenshot slot noted for 5.2 assets. All referenced links existence-checked.
+- [x] `docs/QUICKSTART.md` + `CONTRIBUTING.md` still accurate against final tree. ✅ DONE 2026-11-21 (P5.1) — QUICKSTART: removed machine-specific paths, added missing dep-install step, fixed venv path bug (`../venv`→`../../venv` from src/backend), replaced shipped "Week 2 roadmap" with current next-steps; CONTRIBUTING: rebrand title, real clone URL (GASVS/CodeForge-AI), fake model name → `qwen2.5:7b`, removed placeholder email, added test gates.
+- [x] Delete/archive stale state files: `mvp_report.md`, `project_status_resume.md`, `WEEK1_COMPLETE.md`, `WEEK2_COMPLETE.md`, `day1_progress.md`, `week1_checklist.md`, `week2_progress.md` → move to `docs/archive/` (history stays in git + SESSION_LOG). ✅ DONE 2026-11-21 (P5.1) — all 7 `git mv`'d; also archived `docs/project_plan.md` (same stale-planning category, referenced the moved files); `private/*` copies left alone (gitignored).
 
 ### 5.2 Launch assets
 - [ ] Demo GIF: 30 s — open app → import this repo → RAG question → code-gen answer. (Record with OBS; trim.)

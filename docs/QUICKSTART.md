@@ -17,23 +17,32 @@ ollama pull qwen2.5:7b   # fast, good quality
 ollama pull llama3.2     # alternative option
 ```
 
-### 2. Start the Dashboard
+### 2. Install dependencies (once)
+
+From the repository root:
+
+```bash
+python3 -m venv venv && source venv/bin/activate
+pip install -r src/backend/requirements.txt
+cd frontend && npm install && cd ..
+```
+
+### 3. Start the Dashboard
 
 Option A — Using startup script (easiest):
 ```bash
-cd ~/Desktop/App/jev-opensource-dashboard
 ./start.sh
 ```
 
 Option B — Manual (for debugging):
 ```bash
 # Terminal 1: Backend
-cd ~/Desktop/App/jev-opensource-dashboard/src/backend
-source ../venv/bin/activate  
+cd src/backend
+source ../../venv/bin/activate
 uvicorn main:app --reload --port 8001
 
 # Terminal 2: Frontend  
-cd ~/Desktop/App/jev-opensource-dashboard/frontend
+cd frontend
 npm run dev
 ```
 
@@ -81,11 +90,12 @@ Update your selection in Settings sidebar (menu button top-left)
 
 ## Next Steps
 
-Week 2 roadmap (not ready yet):
-- [ ] Code file upload awareness
-- [ ] Syntax highlighting for generated code  
-- [ ] Multi-file context window
-- [ ] Conversation history persistence
+You're up and running. From here:
+- Attach files/images to a chat, or import a whole project (folder/zip) for code-aware RAG answers
+- Open the command palette with ⌘/Ctrl-K
+- Optional cloud models: add an OpenRouter key under Settings → Cloud (BYOK; local stays default)
+
+Full feature list in the [README](../README.md); what's planned next in [ACTION_PLAN.md](ACTION_PLAN.md).
 
 ---
 

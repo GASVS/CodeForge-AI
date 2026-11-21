@@ -1,213 +1,77 @@
-# Jev Open Source Dashboard Project Plan
-
-**Status**: Planning Phase  
-**Target MVP**: 4-6 weeks  
-**Primary Tech Stack**: Lovable (UI), Python FastAPI, SQLite/PostgreSQL
-
----
-
-## Executive Summary
-Build a polished, open-source alternative to Jev ($400/yr AI coding assistant) that leverages local + cloud AI models with a beautiful UI built using Lovable.
-
-**Key Differentiator**: Beautiful, intuitive UI that makes existing open-source tools look dated (Lovable advantage).
+<div align="center">
+  <img src="assets/codeforge-logo.svg" alt="CodeForge AI" width="120"/>
+  <h1>CodeForge AI</h1>
+  <p><strong>A local-first, open-source AI coding assistant.</strong><br/>
+  Chat with any Ollama model (or your own OpenRouter key), import whole projects for code-aware answers, and keep every byte on your machine.</p>
+  <p><em>Screenshots & demo GIF land with the v1.0 assets.</em></p>
+</div>
 
 ---
 
-## Market Validation (Completed)
-- ✅ "OpenJev" trending #28 on Hacker News: 660 points, 277 comments
-- ✅ "Laya the open source version of Jev" at #1: 398 points, 89 comments
-- ✅ Multiple discussions about expensive AI tools → demand for alternatives
+## Why CodeForge AI?
 
-**Signal**: High. Real market pull, not push.
+Commercial AI coding assistants are expensive and ship your code to someone else's cloud. CodeForge runs entirely on hardware you control: models execute locally through [Ollama](https://ollama.ai), conversations live in a local SQLite file, and there is no telemetry — not even an account. One-click start, keyboard-first UI, project-aware retrieval, and streaming answers that render code with syntax highlighting and copy buttons.
 
----
+## Quick start (3 commands)
 
-## MVP Scope (Weeks 1-4)
+```bash
+# 1. Backend deps (Python 3.10+; creates ./venv)
+python3 -m venv venv && source venv/bin/activate && pip install -r src/backend/requirements.txt
 
-### Phase 1: Core Architecture (Days 1-5)
-#### Tasks
-1. **Project Setup**
-   - Initialize Next.js + Lovable template
-   - Set up FastAPI backend
-   - Configure SQLite database for user preferences
-   - GitHub repo with MIT license
-2. **Model Provider abstraction**
-   - Local model support (Ollama API integration)
-   - Free tier cloud models: OpenRouter free endpoints
-   - Paid tier: OpenAI, Anthropic via user's own keys
-   - Model switching without restart
-3. **Authentication**
-   - Optional GitHub OAuth for syncing settings across devices
-   - Local-first: full functionality works offline/locally
+# 2. Frontend deps
+cd frontend && npm install && cd ..
 
-### Phase 2: UI/UX Build (Days 6-15)
-#### Tasks
-1. **Chat Interface** (Lovable primary work)
-   - Code-aware chat with syntax highlighting
-   - File tree sidebar integration (optional, VFS or local filesystem for desktop version)
-   - Command palette (Cmd+K to run commands like Jev)
-   - Conversation history sidebar
-2. **Code Context**
-   - Upload/scan local codebase (read-only, privacy-first)
-   - "Explain this file" feature using context window
-   - Highlight matching code segments in responses
-3. **Settings Panel**
-   - Model provider configuration
-   - API key management (encrypted storage)
-   - Theme settings (light/dark/system)
-   - Shortcut customization
-
-### Phase 3: Core Features (Days 16-25)
-#### Tasks
-1. **Code Generation**
-   - Generate functions from comments/specs
-   - Multi-file awareness for refactoring suggestions
-   - Unit test generation from codebase
-2. **Chat with Codebase**
-   - Vector embeddings of code files (local-first with ChromaDB or LanceDB)
-   - Semantic search across project files
-   - "Where is X defined?" queries
-3. **Terminal Integration** (basic)
-   - In-app terminal preview
-   - Execute commands in safe sandbox or show as copy-paste
-
-### Phase 4: Polish + Documentation (Days 26-30)
-#### Tasks
-1. **Performance Optimization**
-   - Stream responses (don't wait for full generation)
-   - Lazy load large codebases
-   - Cache common queries
-2. **Documentation**
-   - README.md with installation guide
-   - Feature showcase screenshots from Lovable builds
-   - Contributing guidelines
-   - Discord/Slack invite link for community
-3. **Launch Prep**
-   - Submit to Product Hunt
-   - Prepare Hacker News submission (wait for quiet day, not during big launches)
-   - Create demo video/gif for social media
-   - Outreach to 50+ indie hackers on Twitter/X asking for feedback
-
----
-
-## Planned features (next)
-The two features currently being designed (see `docs/ACTION_PLAN.md` — **Phase 6**):
-
-- **Multi-model chat with shared history & shared skills.** Run several Ollama models inside **one conversation** and share one thread + one skill set across them — pick a fast model for quick answers and a reasoning model for deeper ones, tag each reply with the model that produced it, and apply a skill (e.g. `skills/frontend/react-theme-manage`) that behaves identically on any model in the thread.
-- **Code indexer (MCP-style) to replace `grep` + `python`.** A structural code index — find definitions, signatures, callers, get file outlines — with exact `file:line` results, exposed both as REST for the dashboard and as an **MCP tool server** (`list_files`, `search_symbols`, `get_definition`, `find_references`, `read_file`, `get_file_outline`) so external agents can browse the codebase through the same index.
-
-These build on top of the code-aware core (RAG / semantic search in Phase 3) and are scheduled after those tasks land.
-
-## Competitive Analysis
-### Jev (Target Market Leader)
-| Aspect | Jev | Our Angle |
-|--------|-----|-----------|
-| Price | $400/year | Free + optional donations |
-| Platform | VS Code extension | Standalone app + extensions later |
-| AI Provider | Proprietary/Cloud | User choice (local + cloud) |
-| Privacy | Cloud processing | Optional local-first mode |
-| UI/UX | Functional but basic | Beautiful (Lovable polish) |
-**Our Winning Strategy**: Better UX + privacy focus + free = viral loop within indie dev community.
-
-### Existing Open Source Alternatives
-| Tool | Strengths | Weaknesses | How We Beat Them |
-|------|-----------|------------|------------------|
-| **Cursor** (not open source but free tier) | Great UI, Claude integration | Freemium limits, cloud-only at premium | Local first, unlimited |
-| **Continue.dev** | Open source VS Code extension | Requires setup, CLI-heavy config | Out-of-box beautiful UI |
-| **Tabby** | Self-hosted, local models | Developer experience (UI) raw | Modern UX with Lovable |
-| **Codeium** | Fast, free tier available | Proprietary, privacy concerns | Open source transparency |
----
-
-## Technical Architecture
+# 3. Run everything (Ollama check + backend :8001 + UI :3000)
+./start.sh
 ```
-┌─────────────────────────────────────────┐
-│         Frontend (Lovable + React)      │
-│  - Chat Interface                       │
-│  - File tree                            │
-│  - Settings Panel                       │
-│  - Terminal Preview                     │
-└──────────────┬──────────────────────────┘
-               │
-               │ WebSocket/HTTP
-               │
-┌──────────────▼──────────────────────────┐
-│      Backend (FastAPI + Python)         │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │ Model Provider Abstraction     │   │
-│  ├─────────────────────────────────┤   │
-│  │ - Ollama (local)               │   │
-│  │ - OpenRouter (free/paid)       │   │
-│  │ - Direct API (user's keys)     │   │
-│  └─────────────────────────────────┘   │
-│                                         │
-│  ┌─────────────────────────────────┐   │
-│  │ Code Indexing Service          │   │
-│  │ - File scanning                │   │
-│  │ - Vector embeddings (Chroma)   │   │
-│  │ - Semantic search              │   │
-│  └─────────────────────────────────┘   │
-└──────────────┬──────────────────────────┘
-               │
-               │ SQLite/PostgreSQL
-               │
-┌──────────────▼──────────────────────────┐
-│        Database                        │
-│  - User preferences                    │
-│  - Conversation history                │
-│  - Codebase embeddings metadata        │
-└─────────────────────────────────────────┘
+
+Then open **http://localhost:3000**. You need at least one chat model in Ollama (`ollama pull qwen2.5:7b`, or any other — CodeForge auto-detects whatever `ollama list` shows). Full guide: [docs/QUICKSTART.md](docs/QUICKSTART.md).
+
+## Features
+
+| Area | What you get |
+|---|---|
+| **Chat** | Streaming responses (SSE), Markdown + syntax-highlighted code with copy buttons, regenerate, dark/light theme |
+| **Models** | Any local Ollama model; OpenRouter BYOK for cloud models (opt-in, key stored locally); system prompt & temperature controls |
+| **Project awareness** | Import a folder or zip → file tree + search; RAG picks the relevant chunks of *your* code as context per question; git status/diff integration; apply-patch writes answers back into files |
+| **Files & images** | Attach code/text files or images (multimodal) to any message |
+| **Skills** | Reusable prompt skills shared identically across models |
+| **Conversations** | Persistent history in SQLite, branching, export to Markdown/JSON |
+| **UX** | Command palette (⌘/Ctrl-K), keyboard-first editing, responsive drawers for mobile, live server-logs panel |
+
+## Architecture
+
 ```
----
+┌─────────────────────┐        ┌──────────────────────────┐      ┌────────────────┐
+│  React + Vite UI    │  SSE   │  FastAPI backend (:8001) │ HTTP │  Ollama        │
+│  :3000              │◄──────►│  chat · projects · RAG   │◄────►│  :11434 local  │
+│  Tailwind, TS       │  REST  │  skills · settings · logs│      └────────────────┘
+└─────────────────────┘        │  SQLite + uploads store  │      ┌────────────────┐
+                               └──────────────────────────┘ HTTP │ OpenRouter     │
+                                                                 │ (opt-in BYOK)  │
+                                                                 └────────────────┘
+```
 
-## Risk Mitigation
-| Risk | Probability | Impact | Mitigation |
-|------|-------------|--------|------------|
-| **Overscoping** | High | Critical | Strict MVP scope, defer advanced features to v2 |
-| **LLM costs** | Medium | Medium | Default to free/local models, clear pricing for paid tiers |
-| **Competition releases feature** | Medium | Low | Differentiate on UX + community + speed of iteration |
-| **Privacy concerns** | High | Critical | Local-first architecture, transparent data handling, no telemetry by default |
----
+Backend: FastAPI + SQLite (`src/backend/`). Frontend: Vite + React + TypeScript + Tailwind (`frontend/`). Runtime state lives in `private/runtime/` (gitignored). API reference served live at **http://localhost:8001/docs** (Swagger UI).
 
-## Success Metrics (First 90 Days)
-| Metric | Target | Measurement |
-|--------|--------|-------------|
-| GitHub stars | 100+ | Repository analytics |
-| Active users (daily) | 50+ | Optional anonymous usage tracking (opt-in) |
-| Community (Discord/Slack) | 200+ members | Platform stats |
-| Product Hunt upvotes | 200+ | Launch day |
-| Hacker News engagement | 50+ comments on post | hn api |
----
+## Privacy & security
 
-## Monetization Strategy (Post-MVP)
-**Phase 1**: Free, open source build community and trust  
-**Phase 2** (Month 4+): Optional paid features:
-- Cloud sync across devices ($5/mo)
-- Priority access to new model integrations  
-- Commercial hosting for enterprise teams ($49/mo)
-- Accept donations via Open Collective
----
+- **Local-first.** Prompts, answers and file contents are processed by your local Ollama. Nothing leaves the machine unless you explicitly configure an OpenRouter key (Settings → Cloud); only that conversation's context then goes to OpenRouter, and the key itself is stored in the local SQLite DB.
+- **What's stored where:** conversations / settings / skills / projects → `private/runtime/codeforge.db` (SQLite, gitignored). Uploaded files → `/tmp/jev-uploads` by default; override with the `UPLOAD_DIR` env var. Server logs → `private/runtime/*.log`.
+- **No accounts, no telemetry, no phone-home.** CORS is restricted to the frontend origin (`ALLOWED_ORIGINS`). Uploads are size-capped (2 MB) and type-checked. See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
-## Team Roles Needed
-| Role | Tasks | Notes |
-|------|-------|-------|
-| **Full-stack dev** (You/AI) | Core app, API integration | Primary builder |
-| **Designer** (Lovable does this) | UI/UX polish | Already covered by tool |
-| **Community manager** | Discord/forums moderation | Can be you initially |
-| **Marketing** | Launch posts, outreach | Focus on HN + PH launch day |
----
+## Development
 
-## Next Immediate Actions
-### Week 1 Checklist
-- [ ] Create GitHub repo with this plan as README (partially filled)
-- [ ] Initialize Lovable project with Next.js template  
-- [ ] Build basic chat UI component  
-- [ ] Integrate Ollama test API call
-- [ ] Write blog post draft: "Why we're building open source Jev alternative"
+```bash
+# Backend tests (isolated temp DB; most suites need no Ollama)
+venv/bin/python -m pytest src/backend/tests -q
 
-### Resources Needed
-- VPS for hosting demo (free tier DigitalOcean/Fly.io/Hetzner)
-- Lovable Pro account (if needed for advanced features)
-- Domain name ($12/yr for future branding)
-- Figma account (optional, for early wireframes if not using Lovable exclusively)
----
+# Frontend: types, build, unit tests
+cd frontend && npx tsc --noEmit && npm run build && npm test
+```
+
+Contributions welcome — see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). What's planned next: [docs/ACTION_PLAN.md](docs/ACTION_PLAN.md) · what shipped: [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE) © 2026 CodeForge AI Contributors. Originally developed as "Jev Open Source Dashboard"; rebranded before public launch.
