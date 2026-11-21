@@ -295,3 +295,9 @@
 - [✅] **CONTRIBUTING fixes:** title rebrand; `YOUR-USERNAME/codeforge-ai.git` → `GASVS/CodeForge-AI.git`; nonexistent `qwen3.5:9b` → `qwen2.5:7b`; removed `your.email@example.com`; added the pytest + tsc/build/vitest gates contributors must run.
 - [✅] **Archive:** 7 stale week/state docs `git mv` → `docs/archive/`, plus `docs/project_plan.md` (same category, referenced moved files — deviation from plan list noted). Link check: all README/docs references exist; remaining mentions of archived names are only ACTION_PLAN's own checklist text + gitignored `private/*`.
 - [📌] **NEXT:** 5.2 launch assets (demo GIF via OBS = user; CHANGELOG v1.0 entry, tag, screenshot set) — dogfood session still open for user.
+
+### Session 2026-11-21 — P5.2a CHANGELOG v1.0 entry + version/name alignment
+- [✅] **CHANGELOG `[1.0.0] — 2026-11-21`:** every bullet mapped to a real commit (verified against full `git log --oneline`, no tags existed before this); old Unreleased "Week 3" Added items folded into 1.0.0, Phase-6 planned items kept under Unreleased; sections per Keep-a-Changelog: Added / Changed / Security / Testing.
+- [✅] **Version + name alignment:** `frontend/package.json` was still `jev-open-source-dashboard@0.1.0` while backend FastAPI declared 1.0.0 → renamed to `codeforge-ai@1.0.0`; `package-lock.json` root fields synced (only the 2 root occurrences — two unrelated deps also sit at 0.1.0, untouched). Verified: both files parse as JSON; `npm ls --depth=0` resolves clean against the modified lock.
+- [📌] **Tag decision:** `v1.0` tag deliberately NOT created yet — Definition-of-Done requires README quickstart verified on a fresh machine (Ollama not installed here). One command away once that check passes; noted in ACTION_PLAN 5.2.
+- [📌] **NEXT:** GitHub issue templates (bug/feature) = next 5.2 item I can do locally; demo GIF + screenshots + "good first issue" labels need the user/live repo.

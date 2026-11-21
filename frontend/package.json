@@ -1,6 +1,6 @@
 {
-  "name": "jev-open-source-dashboard",
-  "version": "0.1.0",
+  "name": "codeforge-ai",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

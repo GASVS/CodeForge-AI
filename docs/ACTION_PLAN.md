@@ -180,7 +180,7 @@
 ### 5.2 Launch assets
 - [ ] Demo GIF: 30 s — open app → import this repo → RAG question → code-gen answer. (Record with OBS; trim.)
 - [ ] Screenshot set (dark + light) for README.
-- [ ] `CHANGELOG.md` final v1.0 entry; tag `v1.0`.
+- [x] `CHANGELOG.md` final v1.0 entry; tag `v1.0`. ✅ DONE 2026-11-21 (P5.2) — full v1.0.0 entry compiled from actual commit history (`git log --oneline`, P2.x→P7.14); frontend package renamed `jev-open-source-dashboard`→`codeforge-ai` + version 0.1.0→1.0.0 (lockfile synced, `npm ls` clean; backend FastAPI already declared 1.0.0). ⏳ tag `v1.0` held until fresh-machine quickstart check passes (Definition-of-Done item) — then `git tag -a v1.0 -m "first public release"`.
 - [ ] GitHub: issue templates (bug/feature), Discussions or Discord invite, "good first issue" labels on 3 items (suggestion: temperature slider 3.4, Stop button if still open 2.3, copy on code blocks).
 - **Done when:** README renders on GitHub with working quickstart (verify on a fresh container: clone → start.sh → chat works).
 
