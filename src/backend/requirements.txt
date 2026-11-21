@@ -4,6 +4,8 @@ python-dotenv==1.0.0
 httpx==0.26.0
 pydantic==2.5.3
 numpy==1.26.4
+# /api/upload (UploadFile form parsing) — was present in the old venv but never pinned
+python-multipart==0.0.6
 
 # For future vector embeddings (week 3)
 # chromadb==0.4.22

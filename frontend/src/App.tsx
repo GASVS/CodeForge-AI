@@ -194,6 +194,17 @@ function App() {
     { id: 'toggle-projects', label: 'Toggle project panel', shortcut: '⌘P', action: () => setContextTab(t => t === 'projects' ? null : 'projects') },
   ];
 
+  // P7.14 (Phase 4): upload errors surface as a styled banner instead of
+  // being swallowed into console.error
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showUploadError = (msg: string) => {
+    setUploadError(msg);
+    if (uploadErrorTimer.current) clearTimeout(uploadErrorTimer.current);
+    uploadErrorTimer.current = setTimeout(() => setUploadError(null), 8000);
+  };
+
   // P7.9 multimodal input: pending image URLs attached to the next message
   const [pendingImages, setPendingImages] = useState<string[]>([]);
 
@@ -203,12 +214,27 @@ function App() {
       const ext = f.name.split('.').pop()?.toLowerCase() || '';
       return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
     });
-    if (allowed.length === 0) return;
+    if (allowed.length === 0) {
+      showUploadError(
+        `Unsupported file type — only PNG, JPG, GIF, WebP or SVG images can be attached (${list.length} skipped).`
+      );
+      return;
+    }
+    if (allowed.length < list.length) {
+      showUploadError(`${list.length - allowed.length} file(s) skipped — only image files (PNG/JPG/GIF/WebP/SVG) are supported here.`);
+    }
     const fd = new FormData();
     allowed.forEach(f => fd.append('files', f));
     try {
       const res = await fetch(`${API_URL}/api/upload`, { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(res.statusText);
+      if (!res.ok) {
+        // Show the server's own message (413 too-large / 415 wrong-type detail)
+        const data = await res.json().catch(() => ({} as any));
+        showUploadError(
+          (data && typeof data.detail === 'string' ? data.detail : `Upload failed (HTTP ${res.status}).`) + '.'
+        );
+        return;
+      }
       const data = await res.json();
       const urls = (data.files || [])
         .filter((f: any) => f.url)
@@ -216,6 +242,7 @@ function App() {
       setPendingImages(prev => [...prev, ...urls]);
     } catch (e) {
       console.error('Image upload failed:', e);
+      showUploadError('Upload failed — cannot reach the backend. Is it running on http://localhost:8001?');
     }
   };
 
@@ -727,9 +754,12 @@ function App() {
       armWatchdog(30000); // first frame can take longer on a cold model
     } catch (error) {
       console.error('Chat error:', error);
-      setContent(
-        "❌ Error: Cannot connect to backend. Make sure it's running on http://localhost:8001"
-      );
+      // Phase 4: render as a styled error card with retry, not plain text
+      setMessages(prev => prev.map(msg =>
+        msg.id === assistantMsgId
+          ? { ...msg, error: "Cannot connect to backend. Make sure it's running on http://localhost:8001" }
+          : msg
+      ));
       setIsLoading(false);
     }
   };
@@ -1428,6 +1458,25 @@ function App() {
                     )}
                     <div className={`text-xs mt-2 ${isAssistant ? 'opacity-50' : 'opacity-75'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {/* Phase 4: copy any assistant answer */}
+                      {isAssistant && msg.content && (
+                        <ClipboardCopyButton
+                          text={msg.content}
+                          className={`ml-3 inline-flex align-middle p-1 rounded transition-colors ${theme === 'dark' ? 'hover:bg-slate-800' : 'hover:bg-gray-100'}`}
+                          title="Copy message"
+                        />
+                      )}
+                      {/* Phase 4: regenerate the last answer (error card already has Retry) */}
+                      {isAssistant && msg.content && !msg.error && !isLoading &&
+                        messages.slice(i + 1).every(m => !(m.role === 'assistant' && m.content)) && (
+                        <button
+                          onClick={retryLastMessage}
+                          className="ml-3 underline opacity-70 hover:opacity-100"
+                          title="Regenerate the last answer"
+                        >
+                          ↻ Regenerate
+                        </button>
+                      )}
                       {isAssistant && currentChatId && (
                         <button
                           onClick={() => branchFromMessage(i)}
@@ -1511,6 +1560,17 @@ function App() {
             </button>
           </div>
         </div>
+        {/* Phase 4: upload errors (413 too-large / 415 wrong-type) as a red card */}
+        {uploadError && (
+          <div className="max-w-6xl mx-auto mb-2 flex items-start justify-between gap-3 p-3 rounded-lg border border-rose-500/50 bg-rose-500/10 text-sm text-rose-500">
+            <span className="whitespace-pre-wrap break-words">{uploadError}</span>
+            <button
+              onClick={() => setUploadError(null)}
+              className="shrink-0 opacity-70 hover:opacity-100 leading-none"
+              title="Dismiss"
+            >×</button>
+          </div>
+        )}
         <div className="max-w-6xl mx-auto flex items-center gap-2">
           {/* Context button — cycles: attach files → import project → close */}
           <button

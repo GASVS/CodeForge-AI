@@ -277,3 +277,13 @@
 - [✅] **P7.13C Keyboard hook:** replaced old Cmd+K focus-search behavior with palette open; Esc closes palette.
 - [✅] **P7.13D Overlay UI:** modal palette with filter + keyboard navigation + empty state.
 - [✅] **P7.13E Verified:** `tsc --noEmit` clean; `npm run build` green (442.60 kB); `npm test` 9/9; Playwright 6/6 smoke tests pass (including Cmd+K palette test).
+
+### Session 2026-11-21 — P7.14 PHASE 4 CLOSE-OUT: error cards + copy/regenerate (last Phase 4 code items)
+- [✅] **Env bootstrap on macOS:** repo venv was Linux-only; built scratch env `uv venv --python 3.11` (`~/.hermes/cache/scratch/p714-venv311`) from `requirements.txt`. NOTE: backend needs Python ≥3.10 (PEP 604 unions at runtime) — system python3.9 fails with `TypeError: unsupported operand |`.
+- [✅] **requirements.txt fix:** added `python-multipart==0.0.6` — `/api/upload` imports it but it was never pinned (worked on old machine via ad-hoc install; fresh clone crashed uvicorn at startup). Verified by booting after install.
+- [✅] **Upload error banner (`App.tsx`):** previously upload failures were swallowed into `console.error`. Now: client-side type-filter skips → red banner naming the skipped files; server 413/415 → banner shows backend's own `detail`; network failure → "cannot reach the backend" banner. Auto-dismiss 8 s + manual ✕.
+- [✅] **Connection-failure error card:** stream fetch catch now sets `msg.error` (styled red card with Retry) instead of leaving a dead bubble — completes "never a silent hang".
+- [✅] **Copy + regenerate:** `ClipboardCopyButton` on every non-empty assistant message; "↻ Regenerate" button on the last answered assistant message → `retryLastMessage()` re-sends same chat context (shared with error-card Retry). Hidden while streaming or when msg has error.
+- [🔍] **Verified live** (backend on :8001 via scratch venv, then killed): `/docs` 200; 21 MB png → `413 {"detail":"File exceeds 2 MB limit"}`; `.exe` → `415 Unsupported file type`; text-as-`.png` accepted = existing P7.9 design (images skip binary sniff, plumbing only) — not a regression. Frontend: tsc clean, build green (444 kB), vitest 9/9.
+- [🔍] **Backend suite on macOS:** 32 passed / 7 failed — failures are `httpx.ConnectError` to Ollama :11434 (not installed here). PROVEN pre-existing: stashed my changes, same 7 fail on clean tree. Not caused by P7.14.
+- [📌] **NEXT:** Phase 4 remaining = dogfood session (user task); then Phase 5 docs pass (`README.md` rewrite, archive stale week docs).

@@ -24,3 +24,7 @@ dist/
 .next/
 *.log
 .eslintignore
+
+# Playwright artifacts (P7.11)
+frontend/playwright-report/
+frontend/test-results/
