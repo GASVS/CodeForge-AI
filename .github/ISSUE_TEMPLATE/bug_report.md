@@ -25,7 +25,7 @@ A clear and concise description of what you expected to happen.
 | Item | Value |
 |------|-------|
 | OS | (e.g. Ubuntu 24.04 / macOS 15 / Windows 11) |
-| CodeForge version / commit | (e.g. v0.3.0 or git sha) |
+| CodeForge version / commit | (e.g. v1.0.0 or git sha) |
 | Python version | `python3 --version` |
 | Node.js version | `node --version` |
 | Ollama version | `ollama --version` |
@@ -36,6 +36,8 @@ A clear and concise description of what you expected to happen.
 ```
 paste relevant backend/frontend output here
 ```
+
+Tip: the in-app **Logs drawer** (⌘/Ctrl-K → "Toggle logs") shows live backend output — often the fastest way to capture the error.
 
 ## Security note
 
