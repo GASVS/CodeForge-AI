@@ -40,6 +40,7 @@ interface Message {
   role: 'user' | 'assistant';
   timestamp: Date;
   error?: string; // Phase 4: styled error card instead of inline text
+  model?: string; // P6.1: model that generated this reply (per-message tag)
   toolCalls?: Array<{ id: string; name: string; args: any }>;
   toolResults?: Record<string, any>;
   image_urls?: string[];
@@ -108,6 +109,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamStarted, setStreamStarted] = useState(false);
   const [model, setModel] = useState('qwen3.5-9b-64k:latest');
+  // P6.1: per-reply model override — applies to the next message only, then resets
+  const [nextModelOverride, setNextModelOverride] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   // Phase 4.2 empty states: null = haven't reached the backend yet,
   // true = Ollama/models reachable, false = Ollama (or backend) offline.
@@ -314,7 +317,9 @@ function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: msgs.map(m => ({ role: m.role, content: m.content, image_urls: m.image_urls })),
+          messages: msgs.map(m => ({ role: m.role, content: m.content, image_urls: m.image_urls, model: m.model })),
+          // P6.1: conversations.model = last used model in this chat
+          model: [...msgs].reverse().find(m => m.role === 'assistant' && m.model)?.model,
         }),
       });
       loadChatList();
@@ -337,6 +342,7 @@ function App() {
           id: `${id}-${i}`,
           content: m.content || '',
           role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+          model: m.model, // P6.1: per-message model tag survives reload
           timestamp: new Date(),
         }))
       );
@@ -390,6 +396,7 @@ function App() {
               id: `${chat.id}-${i}`,
               content: m.content || '',
               role: m.role === 'user' ? 'user' : 'assistant',
+              model: m.model, // P6.1: per-message model tag survives reload
               timestamp: new Date(),
             }))
           );
@@ -516,6 +523,7 @@ function App() {
           id: `${newChat.id}-${i}`,
           content: m.content || '',
           role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+          model: m.model, // P6.1: per-message model tag survives reload
           timestamp: new Date(),
         }))
       );
@@ -543,11 +551,16 @@ function App() {
     setPendingImages([]);
     setCompressedNote(null);
 
+    // P6.1: per-reply override wins for this message only, then resets to chat default
+    const effectiveModel = nextModelOverride || model;
+    setNextModelOverride(null);
+
     const assistantMsgId = (Date.now() + 1).toString();
     const assistantMsg: Message = {
       id: assistantMsgId,
       content: '',
       role: 'assistant',
+      model: effectiveModel, // P6.1: tag this reply with its generating model
       timestamp: new Date()
     };
     const baseMessages = currentChatId
@@ -571,7 +584,7 @@ function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model,
+            model: effectiveModel,
             messages: [{ role: 'user', content, image_urls: attachedImages.length > 0 ? attachedImages : undefined }],
           }),
         });
@@ -652,7 +665,7 @@ function App() {
       const fileIds = Array.from(selectedFiles).join(',');
       const params = new URLSearchParams({
         message: content,
-        model_name: model,
+        model_name: effectiveModel, // P6.1: per-message model (override or chat default)
         file_ids: fileIds,
       });
       // P7.1: send conversation history for multi-turn + tool-call support
@@ -1131,6 +1144,19 @@ function App() {
               )}
             </select>
 
+            {/* P6.1: per-reply model override — applies to the next message only */}
+            <select
+              value={nextModelOverride ?? ''}
+              onChange={(e) => setNextModelOverride(e.target.value || null)}
+              title="Use a different model for the next reply only"
+              className={`${theme === 'dark' ? 'bg-slate-900 text-slate-100' : 'bg-slate-100 text-slate-900'} border ${borderColor} rounded-lg px-2 py-2 text-xs hover:border-indigo-500 transition-colors`}
+            >
+              <option value="">Next reply: chat default</option>
+              {availableModels.map((m) => (
+                <option key={m} value={m}>{`next reply: ${m}`}</option>
+              ))}
+            </select>
+
             {/* P7.5 token usage budget */}
             {lastUsage && (() => {
               const ctx = 8192;
@@ -1458,6 +1484,10 @@ function App() {
                     )}
                     <div className={`text-xs mt-2 ${isAssistant ? 'opacity-50' : 'opacity-75'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {isAssistant && msg.model && (
+                        // P6.1: tag every reply with the model that generated it
+                        <span className="ml-1 font-mono">· {msg.model.replace(/:latest$/, '')}</span>
+                      )}
                       {/* Phase 4: copy any assistant answer */}
                       {isAssistant && msg.content && (
                         <ClipboardCopyButton

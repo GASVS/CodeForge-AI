@@ -164,6 +164,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️ Upload restore failed: {e}")
 
+    # Startup: seed skills table from bundled skills/ folder (P6.1, insert-only)
+    try:
+        skills_dir = os.path.join(os.path.dirname(__file__), "..", "..", "skills")
+        n_seeded = database.seed_skills_from_dir(skills_dir)
+        if n_seeded:
+            print(f"📚 Seeded {n_seeded} skill(s) from skills/")
+    except Exception as e:
+        print(f"⚠️ Skill seeding skipped: {e}")
+
     # Startup: check Ollama
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -1783,6 +1792,7 @@ class ChatCreate(BaseModel):
 class ChatUpdate(BaseModel):
     title: Optional[str] = None
     messages: Optional[List[dict]] = None
+    model: Optional[str] = None  # P6.1: last used model for this chat
 
 
 @app.get("/api/chats")
@@ -1808,7 +1818,7 @@ async def api_get_chat(chat_id: str):
 @app.put("/api/chats/{chat_id}")
 async def api_update_chat(chat_id: str, body: ChatUpdate):
     chat = database.update_conversation(
-        chat_id, title=body.title, messages=body.messages)
+        chat_id, title=body.title, messages=body.messages, model=body.model)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
     return chat

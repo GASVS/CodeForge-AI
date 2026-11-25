@@ -122,7 +122,17 @@ def get_db() -> sqlite3.Connection:
                    updated_at INTEGER
                )"""
         )
-        _conn.execute("ALTER TABLE projects ADD COLUMN path TEXT")
+        # Column migrations for legacy DBs: CREATE TABLE IF NOT EXISTS never
+        # adds columns to an existing table, so every post-launch column gets
+        # an entry here and is ALTERed in only when actually missing.
+        _migrations = [
+            ("projects", "path", "TEXT"),
+            ("conversations", "parent_chat_id", "TEXT"),
+        ]
+        for table, col, ddl in _migrations:
+            cols = [r[1] for r in _conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if col not in cols:
+                _conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
         _conn.commit()
     return _conn
 
@@ -204,7 +214,8 @@ def create_conversation(title: str | None = None,
 
 
 def update_conversation(chat_id: str, title: str | None = None,
-                        messages: list | None = None) -> dict | None:
+                        messages: list | None = None,
+                        model: str | None = None) -> dict | None:
     with _lock:
         conn = get_db()
         row = conn.execute(
@@ -215,10 +226,11 @@ def update_conversation(chat_id: str, title: str | None = None,
         new_title = title if title is not None else row["title"]
         new_messages = messages if messages is not None else json.loads(
             row["messages_json"] or "[]")
-        model = row["model"]
+        # P6.1: conversations.model tracks the LAST USED model
+        new_model = model if model is not None else row["model"]
         conn.execute(
-            "UPDATE conversations SET title = ?, updated_at = ?, messages_json = ? WHERE id = ?",
-            (new_title, _now(), json.dumps(new_messages), chat_id),
+            "UPDATE conversations SET title = ?, updated_at = ?, messages_json = ?, model = ? WHERE id = ?",
+            (new_title, _now(), json.dumps(new_messages), new_model, chat_id),
         )
         conn.commit()
     return get_conversation(chat_id)
@@ -529,6 +541,37 @@ def skill_create(name: str, title: str, body: str, model_override: str | None = 
             (name, title, body, model_override, _now()))
         get_db().commit()
     return {"name": name, "title": title, "body": body, "model_override": model_override}
+
+
+def seed_skills_from_dir(base_dir: str) -> int:
+    """P6.1: seed the skills table from SKILL.md files under base_dir.
+
+    Parses YAML-ish frontmatter (name/description) and uses everything after
+    it as the skill body. Insert-only: an existing skill is never overwritten,
+    so user edits survive restarts. Returns the number of newly seeded skills.
+    """
+    import glob
+    seeded = 0
+    for path in sorted(glob.glob(os.path.join(base_dir, "**", "SKILL.md"), recursive=True)):
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            continue
+        name, body = None, text
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) >= 3:
+                for line in parts[1].splitlines():
+                    key, sep, val = line.partition(":")
+                    if sep and key.strip() == "name":
+                        name = val.strip().strip('"').strip("'")
+                body = parts[2].strip()
+        if not name or skill_get(name) is not None:
+            continue
+        skill_create(name=name, title=name, body=body)
+        seeded += 1
+    return seeded
 
 
 def skill_get(name: str) -> dict | None:
