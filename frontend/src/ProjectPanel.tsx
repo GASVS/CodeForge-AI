@@ -100,12 +100,17 @@ function ProjectTree({
   selectedFiles,
   toggle,
   theme,
+  onOutline,
+  activePath,
 }: {
   node: DirNode;
   pathPrefix: string;
   selectedFiles: Set<string>;
   toggle: (id: string) => void;
   theme: 'dark' | 'light';
+  // P6.2: open a file's symbol outline in the code-navigation panel
+  onOutline?: (fullPath: string) => void;
+  activePath?: string | null;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const flip = (key: string) =>
@@ -137,7 +142,7 @@ function ProjectTree({
                 {dir.files.length ? `${dir.files.length} file${dir.files.length > 1 ? 's' : ''}` : ''}
               </span>
             </button>
-            {open && <ProjectTree node={dir} pathPrefix={`${key}/`} selectedFiles={selectedFiles} toggle={toggle} theme={theme} />}
+            {open && <ProjectTree node={dir} pathPrefix={`${key}/`} selectedFiles={selectedFiles} toggle={toggle} theme={theme} onOutline={onOutline} activePath={activePath} />}
           </div>
         );
       })}
@@ -151,7 +156,7 @@ function ProjectTree({
               checked
                 ? theme === 'dark' ? 'bg-indigo-600/20' : 'bg-indigo-50'
                 : theme === 'dark' ? 'hover:bg-slate-800/50' : 'hover:bg-gray-100'
-            }`}
+            } ${activePath === full ? (theme === 'dark' ? 'ring-1 ring-inset ring-indigo-500/50' : 'ring-1 ring-inset ring-indigo-400') : ''}`}
           >
             <input
               type="checkbox"
@@ -163,6 +168,19 @@ function ProjectTree({
             <span className={`flex-1 min-w-0 truncate text-sm ${theme === 'dark' ? 'text-slate-200' : 'text-gray-700'}`} title={full}>
               {f.path}
             </span>
+            {onOutline && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); onOutline(full); }}
+                aria-label={`Symbol outline for ${full}`}
+                title="Symbol outline"
+                className={`shrink-0 text-[10px] font-mono px-1 rounded transition-colors ${
+                  theme === 'dark' ? 'text-slate-400 hover:text-indigo-300 hover:bg-slate-700' : 'text-gray-500 hover:text-indigo-600 hover:bg-gray-200'
+                }`}
+              >
+                {'{ }'}
+              </button>
+            )}
             <span className={`text-xs shrink-0 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-400'}`}>
               {formatSize(f.size)}
             </span>
@@ -189,6 +207,9 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
   const [results, setResults] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+
+  // P6.2: file whose symbol outline is open in the code-navigation panel
+  const [navFile, setNavFile] = useState<string | null>(null);
 
   const resetSearch = () => {
     setQuery('');
@@ -243,6 +264,7 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
     setActiveFiles(files);
     onFilesChange?.(files.map((f: ProjectFileMeta) => f.id));
     resetSearch();
+    setNavFile(null);
   }, [API_URL, onFilesChange]);
 
   const loadProjects = useCallback(async () => {
@@ -668,6 +690,19 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
         />
       )}
 
+      {/* P6.2: symbol search + outline + jump-to-line navigation */}
+      {active && (
+        <CodeNavPanel
+          apiUrl={API_URL}
+          projectId={active.id}
+          projectName={active.name}
+          theme={theme}
+          files={activeFiles}
+          outlineFor={navFile}
+          setOutlineFor={setNavFile}
+        />
+      )}
+
       {/* File tree */}
       <div className="max-h-64 overflow-y-auto p-2">
         {activeFiles.length === 0 ? (
@@ -683,6 +718,8 @@ export default function ProjectPanel({ selectedFiles, setSelectedFiles, theme, o
                 selectedFiles={selectedFiles}
                 toggle={toggle}
                 theme={theme}
+                onOutline={(p) => setNavFile(p)}
+                activePath={navFile}
               />
             );
           })()
@@ -895,6 +932,296 @@ function GitPanel({ apiUrl, projectId, theme }: { apiUrl: string; projectId: str
           <pre className={`p-2 text-xs font-mono overflow-x-auto max-h-64 ${theme === 'dark' ? 'bg-slate-950 text-slate-300' : 'bg-gray-50 text-gray-700'}`}>
             {diffLoading ? 'Loading…' : diff || 'No changes'}
           </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// P6.2: Code navigation panel — global symbol search, per-file outline
+// (opened via the {} button in the file tree), definitions + references, and
+// a jump-to-line viewer with breadcrumbs. Backed by the structural index
+// endpoints from P6.2-partial; no embedding model needed.
+interface SymbolHit {
+  name: string;
+  kind: string;
+  sig?: string | null;
+  file_ref: string;
+  start_line: number;
+  end_line: number;
+  parent?: string | null;
+}
+
+interface RefData {
+  name: string;
+  definitions: Array<{ file_ref: string; kind: string; start_line: number }>;
+  references: Array<{ from_file: string; from_symbol?: string | null; kind: string; line: number }>;
+}
+
+const KIND_BADGE: Record<string, string> = {
+  function: 'bg-indigo-500/15 text-indigo-400',
+  method: 'bg-indigo-500/15 text-indigo-400',
+  class: 'bg-purple-500/15 text-purple-400',
+  interface: 'bg-sky-500/15 text-sky-400',
+  type: 'bg-sky-500/15 text-sky-400',
+  struct: 'bg-sky-500/15 text-sky-400',
+  enum: 'bg-teal-500/15 text-teal-400',
+};
+
+function KindBadge({ kind, theme }: { kind: string; theme: 'dark' | 'light' }) {
+  const cls = KIND_BADGE[kind] || (theme === 'dark' ? 'bg-slate-700/60 text-slate-300' : 'bg-gray-200 text-gray-600');
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ${cls}`}>{kind}</span>;
+}
+
+export function CodeNavPanel({ apiUrl, projectId, projectName, theme, files, outlineFor, setOutlineFor }: {
+  apiUrl: string;
+  projectId: string;
+  projectName: string;
+  theme: 'dark' | 'light';
+  files: ProjectFileMeta[];
+  outlineFor: string | null;
+  setOutlineFor: (p: string | null) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<SymbolHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [navError, setNavError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const [outline, setOutline] = useState<SymbolHit[] | null>(null);
+  const [refsFor, setRefsFor] = useState<string | null>(null);
+  const [refData, setRefData] = useState<RefData | null>(null);
+
+  const [viewing, setViewing] = useState<{ path: string; line: number; symbol?: string } | null>(null);
+  const [viewContent, setViewContent] = useState<string | null>(null);
+  const [indexing, setIndexing] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const targetRef = useRef<HTMLDivElement>(null);
+
+  const mutedCls = theme === 'dark' ? 'text-slate-500' : 'text-gray-400';
+  const bodyText = theme === 'dark' ? 'text-slate-200' : 'text-gray-700';
+  const chipBtn = `text-[11px] px-2 py-0.5 rounded-lg transition-colors ${theme === 'dark' ? 'bg-slate-700 hover:bg-slate-600 text-slate-100 disabled:opacity-40' : 'bg-gray-200 hover:bg-gray-300 text-gray-800 disabled:opacity-40'}`;
+
+  // Outline follows the {} button in the file tree.
+  useEffect(() => {
+    if (!outlineFor) { setOutline(null); return; }
+    let alive = true;
+    fetch(`${apiUrl}/api/projects/${projectId}/outline?path=${encodeURIComponent(outlineFor)}`)
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!alive) return;
+        if (!r.ok) setNavError(d.detail || `Outline failed (${r.status})`);
+        else { setNavError(null); setOutline((d.symbols as SymbolHit[]) || []); }
+      })
+      .catch((e) => alive && setNavError(e instanceof Error ? e.message : 'Outline failed'));
+    return () => { alive = false; };
+  }, [apiUrl, projectId, outlineFor, refreshTick]);
+
+  // Center the highlighted line once content arrives (jsdom has no layout).
+  useEffect(() => {
+    if (!viewing || !viewContent) return;
+    const el = targetRef.current;
+    try { el?.scrollIntoView({ block: 'center' }); } catch { /* not implemented in jsdom */ }
+  }, [viewing, viewContent]);
+
+  const fetchSymbols = async (q: string) => {
+    setSearching(true);
+    setNavError(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/symbols?q=${encodeURIComponent(q)}`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.detail || `Symbol search failed (${res.status})`);
+      setHits((d.symbols as SymbolHit[]) || []);
+    } catch (e) {
+      setNavError(e instanceof Error ? e.message : 'Symbol search failed');
+      setHits([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const runSearch = () => {
+    const q = query.trim();
+    if (!q || searching) return;
+    void fetchSymbols(q);
+  };
+
+  const toggleRefs = async (name: string) => {
+    if (refsFor === name) { setRefsFor(null); setRefData(null); return; }
+    setRefsFor(name);
+    setRefData(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/symbols/${encodeURIComponent(name)}/references`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.detail || `References failed (${res.status})`);
+      setRefData(d as RefData);
+    } catch (e) {
+      setNavError(e instanceof Error ? e.message : 'References failed');
+    }
+  };
+
+  const openAt = async (path: string, line: number, symbol?: string) => {
+    setNavError(null);
+    const f = files.find((x) => x.path === path);
+    if (!f) { setNavError(`"${path}" is not among the imported files`); return; }
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/files/${f.id}`);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.detail || `Failed to load file (${res.status})`);
+      setViewContent(typeof d.content === 'string' ? d.content : '');
+      setViewing({ path, line, symbol });
+    } catch (e) {
+      setNavError(e instanceof Error ? e.message : 'Failed to load file');
+    }
+  };
+
+  const indexSymbols = async () => {
+    setIndexing(true);
+    setNavError(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/projects/${projectId}/index-symbols`, { method: 'POST' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.detail || `Indexing failed (${res.status})`);
+      setNote(`Indexed ${d.symbols ?? 0} symbols / ${d.references ?? 0} references in ${d.files_indexed ?? 0} files`);
+      setRefreshTick((t) => t + 1);
+      if (query.trim()) void fetchSymbols(query.trim());
+    } catch (e) {
+      setNavError(e instanceof Error ? e.message : 'Indexing failed');
+    } finally {
+      setIndexing(false);
+    }
+  };
+
+  const displayName = (h: SymbolHit) => (h.parent ? `${h.parent}.${h.name}` : h.name);
+
+  const MAX_VIEW_LINES = 8000;
+  const viewLines = viewing && viewContent !== null ? viewContent.split('\n') : [];
+
+  return (
+    <div className={`mx-3 mt-3 p-3 rounded-lg border ${theme === 'dark' ? 'bg-slate-800/40 border-slate-700' : 'bg-white border-gray-200'}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs font-medium opacity-70">Code navigation</span>
+        <button onClick={() => void indexSymbols()} disabled={indexing} className={`ml-auto ${chipBtn}`} title="Rebuild the structural symbol index (no embedding model needed)">
+          {indexing ? 'Indexing…' : '⚙ Index symbols'}
+        </button>
+      </div>
+
+      {/* Global symbol search */}
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
+          placeholder="Find a symbol — function, class, method…"
+          className={`flex-1 min-w-0 bg-transparent outline-none text-sm ${theme === 'dark' ? 'text-slate-100 placeholder:text-slate-500' : 'text-gray-800 placeholder:text-gray-400'}`}
+        />
+        <button onClick={runSearch} disabled={searching || !query.trim()} className={chipBtn}>
+          {searching ? 'Searching…' : 'Go'}
+        </button>
+      </div>
+
+      {navError && <div className="mt-2 p-2 rounded-lg bg-rose-500/10 text-rose-500 text-xs">⚠️ {navError}</div>}
+      {note && <div className={`mt-2 text-xs ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-600'}`}>{note}</div>}
+
+      {/* Search results */}
+      {hits !== null && (
+        <div className={`mt-2 max-h-44 overflow-y-auto divide-y ${theme === 'dark' ? 'divide-slate-700/60' : 'divide-gray-100'}`}>
+          {hits.length === 0 && <p className={`text-xs py-2 ${mutedCls}`}>No symbols matched — try "Index symbols" first.</p>}
+          {hits.slice(0, 50).map((h, i) => (
+            <div key={`${h.file_ref}:${h.start_line}:${h.name}:${i}`} className="py-1.5">
+              <div className="flex items-center gap-2 text-xs min-w-0">
+                <button onClick={() => void openAt(h.file_ref, h.start_line, displayName(h))} className={`font-mono truncate hover:underline text-left ${bodyText}`} title={h.sig || undefined}>
+                  {displayName(h)}
+                </button>
+                <KindBadge kind={h.kind} theme={theme} />
+                <span className={`font-mono truncate ${mutedCls}`}>{h.file_ref}:{h.start_line}</span>
+                <button onClick={() => void toggleRefs(h.name)} className={`ml-auto shrink-0 ${chipBtn}`} title="Definitions and every indexed use">
+                  {refsFor === h.name ? 'Hide refs' : 'Refs'}
+                </button>
+              </div>
+              {refsFor === h.name && refData && (
+                <div className={`mt-1 ml-2 pl-2 border-l text-xs ${theme === 'dark' ? 'border-slate-700' : 'border-gray-200'}`}>
+                  {refData.definitions.map((d, j) => (
+                    <button key={`d${j}`} onClick={() => void openAt(d.file_ref, d.start_line, refData.name)} className="flex items-center gap-2 py-0.5 hover:underline text-left w-full min-w-0">
+                      <span className={mutedCls}>def</span>
+                      <KindBadge kind={d.kind} theme={theme} />
+                      <span className={`font-mono truncate ${bodyText}`}>{d.file_ref}:{d.start_line}</span>
+                    </button>
+                  ))}
+                  {refData.references.map((r, j) => (
+                    <button key={`r${j}`} onClick={() => void openAt(r.from_file, r.line, r.from_symbol || undefined)} className="flex items-center gap-2 py-0.5 hover:underline text-left w-full min-w-0">
+                      <span className={`${mutedCls} shrink-0`}>{r.kind}</span>
+                      <span className={`font-mono truncate ${bodyText}`}>{r.from_file}:{r.line}</span>
+                      {r.from_symbol && <span className={`truncate ${mutedCls}`}>in {r.from_symbol}()</span>}
+                    </button>
+                  ))}
+                  {refData.definitions.length === 0 && refData.references.length === 0 && (
+                    <p className={`py-1 ${mutedCls}`}>No definitions or uses indexed for "{refData.name}".</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+          {hits.length > 50 && <p className={`text-xs py-1.5 ${mutedCls}`}>…and {hits.length - 50} more — refine the query.</p>}
+        </div>
+      )}
+
+      {/* Per-file outline (opened from {} in the file tree) */}
+      {outlineFor && (
+        <div className={`mt-2 pt-2 border-t ${theme === 'dark' ? 'border-slate-700/60' : 'border-gray-100'}`}>
+          <div className="flex items-center gap-1 text-xs mb-1 min-w-0">
+            <span className={mutedCls}>{projectName}</span>
+            <span className={mutedCls}>›</span>
+            <span className={`font-mono truncate ${bodyText}`}>{outlineFor}</span>
+            <button onClick={() => setOutlineFor(null)} className={`ml-auto shrink-0 hover:text-rose-500 ${mutedCls}`} title="Close outline">✕</button>
+          </div>
+          {outline === null ? (
+            <p className={`text-xs ${mutedCls}`}>Loading outline…</p>
+          ) : outline.length === 0 ? (
+            <p className={`text-xs ${mutedCls}`}>No symbols in this file — non-code file, or indexed before P6.2? Try "Index symbols".</p>
+          ) : (
+            <div className="max-h-44 overflow-y-auto">
+              {outline.map((s, i) => (
+                <button key={`${s.name}:${i}`} onClick={() => void openAt(outlineFor, s.start_line, displayName(s))}
+                  className={`flex items-center gap-2 w-full text-left text-xs py-1 rounded ${s.parent ? 'pl-4' : ''} ${theme === 'dark' ? 'hover:bg-slate-700/40' : 'hover:bg-gray-100'}`}>
+                  <KindBadge kind={s.kind} theme={theme} />
+                  <span className={`font-mono truncate ${bodyText}`} title={s.sig || undefined}>{s.name}</span>
+                  {s.sig && <span className={`truncate hidden md:inline ${mutedCls}`}>{s.sig}</span>}
+                  <span className={`ml-auto shrink-0 font-mono ${mutedCls}`}>L{s.start_line}{s.end_line !== s.start_line ? `–${s.end_line}` : ''}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Jump-to-line viewer */}
+      {viewing && (
+        <div className={`mt-2 pt-2 border-t ${theme === 'dark' ? 'border-slate-700/60' : 'border-gray-100'}`}>
+          <div className="flex items-center gap-1 text-xs mb-1 min-w-0">
+            <span className={mutedCls}>{projectName}</span>
+            <span className={mutedCls}>›</span>
+            <button onClick={() => setOutlineFor(viewing.path)} className={`font-mono truncate hover:underline ${bodyText}`}>{viewing.path}</button>
+            {viewing.symbol && (<><span className={mutedCls}>›</span><span className={`font-mono truncate ${bodyText}`}>{viewing.symbol}</span></>)}
+            <span className={`shrink-0 font-mono ${mutedCls}`}>:{viewing.line}</span>
+            <button onClick={() => { setViewing(null); setViewContent(null); }} className={`ml-auto shrink-0 hover:text-rose-500 ${mutedCls}`} title="Close viewer">✕</button>
+          </div>
+          <div className={`max-h-72 overflow-auto rounded font-mono text-xs py-1 ${theme === 'dark' ? 'bg-slate-950/70 text-slate-300' : 'bg-gray-50 text-gray-700'}`}>
+            {viewLines.slice(0, MAX_VIEW_LINES).map((t, i) => {
+              const n = i + 1;
+              const target = n === viewing.line;
+              return (
+                <div key={n} data-testid={`code-line-${n}`} ref={target ? targetRef : undefined}
+                  className={`flex ${target ? 'bg-indigo-500/20' : ''}`}>
+                  <span className="w-10 shrink-0 text-right pr-2 select-none opacity-40 tabular-nums">{n}</span>
+                  <span className="whitespace-pre-wrap break-all flex-1 pr-2">{t || ' '}</span>
+                </div>
+              );
+            })}
+            {viewLines.length > MAX_VIEW_LINES && <p className={`px-2 py-1 ${mutedCls}`}>…preview truncated at {MAX_VIEW_LINES} lines.</p>}
+          </div>
         </div>
       )}
     </div>
