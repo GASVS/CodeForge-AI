@@ -44,6 +44,14 @@ echo ""
 cd "$BACKEND_DIR"
 source "$VENV_DIR/bin/activate"
 
+# Backend uses PEP-604 syntax; pinned deps (pydantic-core) have no wheels outside this range.
+if ! python -c 'import sys; raise SystemExit(0 if (3,10) <= sys.version_info < (3,14) else 1)' 2>/dev/null; then
+    echo "❌ Backend needs Python >=3.10,<3.14 (venv has: $(python --version 2>&1))"
+    echo "   macOS system python3 (3.9) is too old; newer pythons lack dep wheels."
+    echo "   Recreate the venv with: brew install python@3.11 && rm -rf venv && python3.11 -m venv venv"
+    exit 1
+fi
+
 echo "🎨 Backend API on http://localhost:8001"
 echo "💬 Frontend UI on http://localhost:3000"
 echo ""
@@ -63,8 +71,10 @@ sleep 2
 if curl -s http://localhost:8001/health | grep -q "healthy"; then
     echo "✅ Backend running"
 else
-    echo "❌ Failed to start backend"
-    kill $BACKEND_PID
+    echo "❌ Failed to start backend — last lines of $LOG_DIR/api_server.log:"
+    sleep 1   # let tee flush what the dying process wrote
+    tail -20 "$LOG_DIR/api_server.log" 2>/dev/null || true
+    kill $BACKEND_PID 2>/dev/null || true
     exit 1
 fi
 

@@ -295,11 +295,11 @@
 ---
 
 ## Definition of Done — v1.0 (the "full working app")
-- [ ] `./start.sh` from a clean clone → working chat in < 2 min (no manual steps)
+- [ ] `./start.sh` from a clean clone → working chat in < 2 min (no manual steps) — **dry-run 2026-11-26:** clone→venv+pip→npm install→`start.sh`→backend healthy + `/api/chats` + :3000 all green on py3.11, no Ollama needed for boot; only the chat step remains (needs Ollama + model). Found & fixed: python-version guard + failure log-dump in start.sh.
 - [ ] Streaming chat with working Stop button + thinking indicator
 - [ ] File upload + folder import + RAG search answering correctly
 - [ ] Chat history persists across refresh (SQLite-sourced) + export
 - [ ] `pytest` + `tsc` + `npm build` + CI all green
 - [ ] No `.env`/db/venv in `git status`; `.gitignore` enforced
-- [ ] README quickstart verified on a fresh machine
+- [ ] README quickstart verified on a fresh machine — **same dry-run:** QUICKSTART §2 steps executed verbatim (added explicit py 3.10–3.13 version note; system python3=3.9 silently installs then crashes, brew 3.15 has no pydantic-core wheel)
 - [ ] Zero unhandled 500s on any documented endpoint (tested with bad inputs)

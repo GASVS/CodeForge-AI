@@ -22,6 +22,9 @@ ollama pull llama3.2     # alternative option
 From the repository root:
 
 ```bash
+python3 --version   # MUST be 3.10–3.13 (tested with 3.11).
+                    # macOS system python3 is 3.9 and will crash the backend;
+                    # use `brew install python@3.11` or `uv venv --python 3.11`.
 python3 -m venv venv && source venv/bin/activate
 pip install -r src/backend/requirements.txt
 cd frontend && npm install && cd ..
