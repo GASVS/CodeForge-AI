@@ -416,6 +416,14 @@ async def _import_project_files(name: str, raw_files: List[dict], path: str | No
                     proj["id"], stats.get("chunks", 0), stats.get("files_indexed", 0))
     except HTTPException as e:
         logger.warning("Project %s imported but not indexed: %s", proj.get("name"), e.detail)
+    # P6.2: structural symbol index (pure local parse — cannot fail remotely)
+    try:
+        sym_stats = database.index_project_symbols(proj["id"])
+        logger.info("Project %s symbols: %s symbols, %s refs in %s files",
+                    proj["id"], sym_stats["symbols"], sym_stats["references"],
+                    sym_stats["files_indexed"])
+    except Exception as e:  # index is best-effort; import must still succeed
+        logger.warning("Project %s symbol index failed: %s", proj.get("name"), e)
     return proj
 
 
@@ -819,11 +827,20 @@ async def _embed_texts(texts: list[str]) -> list[list[float]]:
     out: list[list[float]] = []
     for start in range(0, len(texts), EMBED_BATCH):
         batch = texts[start:start + EMBED_BATCH]
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_BASE_URL}/api/embed",
-                json={"model": EMBED_MODEL, "input": batch},
-            )
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_BASE_URL}/api/embed",
+                    json={"model": EMBED_MODEL, "input": batch},
+                )
+        except httpx.HTTPError as e:
+            # Ollama not running / unreachable / timeout. Callers already handle
+            # HTTPException (import logs it, search returns []); a raw httpx error
+            # would escape as a 500 instead of the documented 502.
+            raise HTTPException(
+                status_code=502,
+                detail=f"Embedding model '{EMBED_MODEL}' unreachable: {e}",
+            ) from e
         if resp.status_code >= 400:
             raise HTTPException(
                 status_code=502,
@@ -938,7 +955,13 @@ async def project_index_endpoint(project_id: str):
     if database.project_get(project_id) is None:
         raise HTTPException(status_code=404, detail="Project not found")
     database.embeddings_clear(project_id)
-    return await project_index(project_id)
+    stats = await project_index(project_id)
+    # P6.2: rebuild the structural index alongside RAG (one "reindex" button).
+    # Namespaced keys so RAG's files_indexed/chunks are not clobbered.
+    sym = database.index_project_symbols(project_id)
+    stats.update({"symbols": sym["symbols"], "references": sym["references"],
+                  "symbol_files_indexed": sym["files_indexed"]})
+    return stats
 
 
 @app.get("/api/projects/{project_id}/search")
@@ -949,6 +972,41 @@ async def project_search_endpoint(project_id: str, q: str, k: int = 10):
     if not q or not q.strip():
         raise HTTPException(status_code=422, detail="'q' (the query) is required")
     return await project_search(project_id, q.strip(), k=k)
+
+
+# P6.2: structural code index — symbol search / references / outline
+@app.get("/api/projects/{project_id}/symbols")
+async def symbols_endpoint(project_id: str, q: Optional[str] = None,
+                           kind: Optional[str] = None):
+    """Search indexed symbols (exact-name matches first)."""
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"symbols": database.symbol_search(project_id, q=q, kind=kind)}
+
+
+@app.get("/api/projects/{project_id}/symbols/{name}/references")
+async def symbol_references_endpoint(project_id: str, name: str):
+    """Where `name` is defined and every indexed use/call/import site."""
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return database.symbol_references(project_id, name)
+
+
+@app.get("/api/projects/{project_id}/outline")
+async def file_outline_endpoint(project_id: str, path: str):
+    """Symbols in one file with line ranges (the plan's /files/{path}/outline;
+    `path` is a query param because repo paths contain slashes)."""
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"path": path, "symbols": database.file_outline(project_id, path)}
+
+
+@app.post("/api/projects/{project_id}/index-symbols")
+async def index_symbols_endpoint(project_id: str):
+    """Rebuild only the structural symbol index (no embeddings needed)."""
+    if database.project_get(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return database.index_project_symbols(project_id)
 
 
 # P7.2 patch/diff apply
@@ -1073,6 +1131,12 @@ async def apply_patch(project_id: str, body: ApplyPatchRequest):
     updated = database.project_file_update(file_row['id'], patched)
     if updated is None:
         raise HTTPException(status_code=500, detail="Failed to write patched file")
+
+    # P6.2: re-extract symbols for the patched file only (incremental update)
+    try:
+        database.index_file_symbols(project_id, target_path, patched)
+    except Exception as e:  # best-effort; patch already applied and must stand
+        logger.warning("Symbol re-index after patch failed for %s: %s", target_path, e)
 
     # P7.2: re-index that file in RAG so search reflects the change
     try:

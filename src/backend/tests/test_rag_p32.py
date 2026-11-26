@@ -130,6 +130,19 @@ def test_import_succeeds_even_when_embedder_down(client, fresh_projects, monkeyp
     client.delete(f"/api/projects/{pid}")
 
 
+def test_connection_error_maps_to_502_not_500(client, fresh_projects, monkeypatch):
+    """A dead Ollama raises httpx.ConnectError inside _embed_texts. It must map
+    to a clean 502 (import survives it), never leak an opaque 500 to the UI."""
+    monkeypatch.setattr(main, "OLLAMA_BASE_URL", "http://127.0.0.1:1")  # closed port
+    r = client.post("/api/projects", json={"name": "rag-refuse",
+                                           "files": [{"path": "a.py", "content": "y = 2"}]})
+    assert r.status_code == 200, r.text   # import survives, index skipped (logged)
+    pid = r.json()["id"]
+    r = client.post(f"/api/projects/{pid}/index")   # manual rebuild hits the real path
+    assert r.status_code == 502 and "unreachable" in r.json()["detail"].lower()
+    client.delete(f"/api/projects/{pid}")
+
+
 def test_index_endpoint_rebuilds_idempotently(client, fresh_projects, fake_embedder):
     pid = _import(client, "rag-rebuild", {
         "m.py": "def f():\n    return 41 + 1\n"})["id"]

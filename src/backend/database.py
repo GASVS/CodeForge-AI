@@ -26,7 +26,9 @@ _DB_DIR = os.path.join(
     "runtime",
 )
 os.makedirs(_DB_DIR, exist_ok=True)
-DB_PATH = os.path.join(_DB_DIR, "codeforge.db")
+# CODEFORGE_DB lets out-of-process tools (mcp_server.py under tests) point at
+# an isolated DB without monkeypatching module state.
+DB_PATH = os.environ.get("CODEFORGE_DB") or os.path.join(_DB_DIR, "codeforge.db")
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -115,6 +117,35 @@ def get_db() -> sqlite3.Connection:
         )
         _conn.execute("CREATE INDEX IF NOT EXISTS idx_pfiles_proj ON project_files(project_id)")
         _conn.execute("CREATE INDEX IF NOT EXISTS idx_embed_proj ON embeddings(project_id)")
+        # P6.2 structural code index (symbols.py extractor fills these)
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS code_symbols (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   project_id TEXT NOT NULL,
+                   file_ref TEXT NOT NULL,
+                   name TEXT NOT NULL,
+                   kind TEXT NOT NULL,
+                   sig TEXT,
+                   start_line INTEGER NOT NULL,
+                   end_line INTEGER NOT NULL,
+                   parent TEXT
+               )"""
+        )
+        _conn.execute(
+            """CREATE TABLE IF NOT EXISTS code_refs (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   project_id TEXT NOT NULL,
+                   from_file TEXT NOT NULL,
+                   from_symbol TEXT,
+                   to_name TEXT NOT NULL,
+                   kind TEXT NOT NULL,
+                   line INTEGER NOT NULL
+               )"""
+        )
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_symbols_proj ON code_symbols(project_id)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON code_symbols(project_id, name)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_refs_to ON code_refs(project_id, to_name)")
+        _conn.execute("CREATE INDEX IF NOT EXISTS idx_refs_file ON code_refs(project_id, from_file)")
         _conn.execute(
             """CREATE TABLE IF NOT EXISTS settings (
                    key TEXT PRIMARY KEY,
@@ -419,6 +450,8 @@ def project_delete(project_id: str) -> bool:
         cur = conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         conn.execute("DELETE FROM project_files WHERE project_id=?", (project_id,))
         conn.execute("DELETE FROM embeddings WHERE project_id=?", (project_id,))
+        conn.execute("DELETE FROM code_symbols WHERE project_id=?", (project_id,))
+        conn.execute("DELETE FROM code_refs WHERE project_id=?", (project_id,))
         conn.commit()
     return cur.rowcount > 0
 
@@ -465,6 +498,102 @@ def project_file_update(file_id: str, content: str) -> dict | None:
             return None
         get_db().commit()
     return {"id": file_id, "size": size, "line_count": line_count}
+
+
+# --- P6.2: structural code index --------------------------------------------
+
+def symbols_replace_file(project_id: str, file_ref: str,
+                         symbols: list[dict], refs: list[dict]) -> None:
+    """Replace the indexed symbols/refs for one file (idempotent re-index)."""
+    with _lock:
+        conn = get_db()
+        conn.execute("DELETE FROM code_symbols WHERE project_id=? AND file_ref=?",
+                     (project_id, file_ref))
+        conn.execute("DELETE FROM code_refs WHERE project_id=? AND from_file=?",
+                     (project_id, file_ref))
+        for s in symbols:
+            conn.execute(
+                "INSERT INTO code_symbols (project_id, file_ref, name, kind, sig,"
+                " start_line, end_line, parent) VALUES (?,?,?,?,?,?,?,?)",
+                (project_id, file_ref, s["name"], s["kind"], s.get("sig"),
+                 s["start_line"], s["end_line"], s.get("parent")))
+        for r in refs:
+            conn.execute(
+                "INSERT INTO code_refs (project_id, from_file, from_symbol,"
+                " to_name, kind, line) VALUES (?,?,?,?,?,?)",
+                (project_id, file_ref, r.get("from_symbol"), r["to_name"],
+                 r["kind"], r["line"]))
+        conn.commit()
+
+
+def symbol_search(project_id: str, q: str | None = None,
+                  kind: str | None = None, limit: int = 200) -> list[dict]:
+    sql = ("SELECT name, kind, sig, file_ref, start_line, end_line, parent"
+           " FROM code_symbols WHERE project_id=?")
+    args: list = [project_id]
+    if q:
+        # identifier-ish search: exact match wins via ORDER BY below
+        sql += " AND (name = ? OR name LIKE ?)"
+        args += [q, f"%{q}%"]
+    if kind:
+        sql += " AND kind=?"
+        args.append(kind)
+    sql += " ORDER BY CASE WHEN name=? THEN 0 ELSE 1 END, name LIMIT ?"
+    args += [q or "", limit]
+    with _lock:
+        rows = get_db().execute(sql, args).fetchall()
+    return [dict(r) for r in rows]
+
+
+def symbol_references(project_id: str, name: str) -> dict:
+    """Definitions of `name` plus every indexed use/call/import site."""
+    with _lock:
+        defs = [dict(r) for r in get_db().execute(
+            "SELECT file_ref, kind, sig, start_line, end_line, parent"
+            " FROM code_symbols WHERE project_id=? AND name=?"
+            " ORDER BY file_ref, start_line", (project_id, name)).fetchall()]
+        refs = [dict(r) for r in get_db().execute(
+            "SELECT from_file, from_symbol, kind, line FROM code_refs"
+            " WHERE project_id=? AND to_name=? ORDER BY from_file, line",
+            (project_id, name)).fetchall()]
+    return {"name": name, "definitions": defs, "references": refs}
+
+
+def file_outline(project_id: str, path: str) -> list[dict]:
+    with _lock:
+        rows = get_db().execute(
+            "SELECT name, kind, sig, start_line, end_line, parent"
+            " FROM code_symbols WHERE project_id=? AND file_ref=?"
+            " ORDER BY start_line", (project_id, path)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def index_file_symbols(project_id: str, path: str, content: str) -> int:
+    """(Re)index one file; returns symbol count written (0 = skipped type)."""
+    from symbols import extract  # sibling module; lazy to keep DB layer light
+    syms, refs = extract(path, content)
+    symbols_replace_file(project_id, path, syms, refs)
+    return len(syms)
+
+
+def index_project_symbols(project_id: str) -> dict:
+    """Rebuild the whole symbol index for a project from stored file contents."""
+    with _lock:
+        rows = get_db().execute(
+            "SELECT path, content FROM project_files WHERE project_id=?",
+            (project_id,)).fetchall()
+    total_syms = total_refs = files_indexed = 0
+    for r in rows:
+        from symbols import extract
+        syms, refs = extract(r["path"], r["content"] or "")
+        if not syms and not refs:
+            continue
+        symbols_replace_file(project_id, r["path"], syms, refs)
+        files_indexed += 1
+        total_syms += len(syms)
+        total_refs += len(refs)
+    return {"files_indexed": files_indexed, "symbols": total_syms,
+            "references": total_refs}
 
 
 # --- Phase 3: settings (key/value) ------------------------------------------
