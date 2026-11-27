@@ -1454,7 +1454,7 @@ def register_tool(name: str, description: str, parameters: dict, handler):
         "handler": handler,
     }
 
-async def _estimate_tokens(text: str) -> int:
+def _estimate_tokens(text: str) -> int:
     return max(len(text), 1) // 4
 
 

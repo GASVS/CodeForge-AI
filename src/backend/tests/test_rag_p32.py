@@ -203,7 +203,7 @@ async def test_stream_chat_project_ids_rag_prefix(client, fresh_projects, fake_e
 
     captured: dict = {}
 
-    async def fake_stream(prompt, model_name, prefix_context=""):
+    async def fake_stream(prompt, model_name, prefix_context="", **_extra):
         captured["prefix"] = prefix_context
         captured["prompt"] = prompt
         yield "data: {\"text\": \"ok\"}\n\n"
@@ -216,15 +216,18 @@ async def test_stream_chat_project_ids_rag_prefix(client, fresh_projects, fake_e
         "project_ids": pid,
     })
     assert r.status_code == 200
-    assert "svc/handler.py" in captured["prefix"]
-    assert "def respond" in captured["prefix"]
+    # P7: stream path inlines the RAG block into the user message (no prefix kwarg).
+    text = "\n".join(m.get("content") or "" for m in captured["prompt"])
+    assert "svc/handler.py" in text
+    assert "def respond" in text
     # classic file_ids flow still works and stays RAG-free
     captured.clear()
     r = client.get("/stream/api/chat", params={
         "message": "hi", "model_name": "m", "file_ids": "no-such-id",
     })
     assert r.status_code == 200
-    assert captured["prefix"] == ""
+    last_user = [m for m in captured["prompt"] if m.get("role") == "user"][-1]
+    assert last_user["content"] == "hi"
     client.delete(f"/api/projects/{pid}")
 
 
@@ -236,7 +239,7 @@ def test_api_chat_accepts_project_ids_field(client, fresh_projects, fake_embedde
 
     captured: dict = {}
 
-    async def fake_generate(prompt, model_name, prefix_context=""):
+    async def fake_generate(prompt, model_name, prefix_context="", **_extra):
         captured["prefix"] = prefix_context
         captured["prompt"] = prompt
         return "fast → 100"
