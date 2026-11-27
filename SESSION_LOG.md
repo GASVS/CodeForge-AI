@@ -372,3 +372,9 @@
   3. Next buildable feature: **P6.2 code indexer** (plan line 205) — structural index (defs/signatures/callers, `file:line`) as REST + MCP server. Nothing started yet.
   4. v1.0 launch leftovers: demo GIF (line 181), README screenshots dark+light (182), fresh good-first-issue candidates (184 — old three shipped), then PH/HN outreach (188). `git tag -a v1.0` not yet created — decide after push.
 - [📋] **Dogfood backlog awaiting a slot** (from today's session, logged above): aria-labels on icon-only buttons; "not a git repository" wording for non-git imports; UI copy that uploads are session-scoped.
+
+### Session 2026-11-27 (post-restart) — pushed all work + **first green CI** → P2.4 closed
+- [✅] **Pushed 47 commits to origin/main** (`4ec7aa6..3342dd3`). Work no longer disk-only. Note: SSH key for this repo never existed on this Mac (only a `turretfrontier` key) — switched origin to HTTPS + `gh auth setup-git`; push now works via gh credentials.
+- [🐛→✅] **CI red on first run** (`46014257305`): frontend job EBADPLATFORM — `@rollup/rollup-darwin-arm64` was pinned in devDependencies (macOS-only, un-installable on linux runners). Removed the pin, regenerated lockfile (rollup's own os/cpu-gated optional deps cover all platforms), re-verified locally with a clean `rm -rf node_modules && npm ci` + tsc/build/vitest 16/16. Commit `3342dd3`.
+- [✅] **CI green** (`46014901008`): backend tests ✅ + frontend tsc/test/build ✅ — first-ever green CI on this repo → P2.4 line 129 closed (plan updated).
+- [▶] **Next per stop point:** P6.1 alternation check needs `qwen3.5-9b-64k`/`qwen3.8-27b-96k` pulled (blocked on user models); next buildable = **P6.2 code indexer** (REST + MCP structural index).

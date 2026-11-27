@@ -126,8 +126,8 @@
 - [x] `src/backend/requirements.txt` + `requirements-dev.txt` (pytest, httpx already there, pytest-asyncio; chromadb stays commented for P3). ✅ VERIFIED 2026-11-27 sweep
 - [x] Frontend: 1 component test (port the existing `MessageInput.test.tsx` from `frontend/frontend/` into the Vite app with Vitest — swap jest config for `vitest` in package.json, or keep jest with jsdom; pick Vitest for Vite-native simplicity). ✅ VERIFIED 2026-11-27 sweep
 - [x] `.github/workflows/ci.yml`: job 1 python 3.11 `pip install -r requirements.txt -r requirements-dev.txt && pytest -q`; job 2 node 20 `npm ci && npx tsc --noEmit && npm run build && npm test`. ✅ VERIFIED 2026-11-27 sweep
-- [ ] Verify: `pytest -q` local passes; push a branch, CI goes green. — pytest local green 2026-11-27 (60 passed); CI leg awaits first push.
-- **Done when:** local + CI both green. Commit: `test: backend API tests, vitest setup, CI workflow`.
+- [x] Verify: `pytest -q` local passes; push a branch, CI goes green. ✅ DONE 2026-11-27 — pytest local 60 passed; pushed main (`3342dd3`) → **CI run 46014901008 both jobs green** (backend tests + frontend tsc/test/build). First-ever green CI.
+- **Done when:** local + CI both green. ✅ MET 2026-11-27. Commit: `test: backend API tests, vitest setup, CI workflow`.
 
 ---
 
