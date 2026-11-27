@@ -1617,7 +1617,7 @@ function App() {
               : 'Close the context panel'
             }
           >
-            {uploadedFiles.length > 0 ? (
+            {uploadedFiles.length > 0 || selectedFiles.size > 0 ? (
               <span className="flex items-center gap-1.5 text-sm font-medium">
                 📎 {selectedFiles.size}
               </span>

@@ -9,6 +9,9 @@ interface UploadedFile {
   url?: string; // P7.9: images get a serving URL from /api/upload
 }
 
+// UI copy says "Select up to 5 files" — auto-selection respects this cap.
+const MAX_SELECTED_FILES = 5;
+
 interface Props {
   uploadedFiles: UploadedFile[];
   setUploadedFiles: React.Dispatch<React.SetStateAction<UploadedFile[]>>;
@@ -49,7 +52,18 @@ export default function FileContext({
       if (!response.ok) throw new Error('Upload failed');
 
       const data = await response.json();
-      setUploadedFiles(prev => [...prev, ...data.files]);
+      const newFiles = data.files as UploadedFile[];
+      setUploadedFiles(prev => [...prev, ...newFiles]);
+      // Auto-select freshly uploaded files (dogfood finding, Nov 27): a file
+      // that sits unselected silently sends zero context — the #1 trap.
+      setSelectedFiles(prev => {
+        const next = new Set(prev);
+        for (const f of newFiles) {
+          if (next.size >= MAX_SELECTED_FILES) break;
+          next.add(f.id);
+        }
+        return next;
+      });
     } catch (error) {
       console.error('File upload error:', error);
       alert(`Failed to upload files: ${error instanceof Error ? error.message : 'Unknown error'}`);

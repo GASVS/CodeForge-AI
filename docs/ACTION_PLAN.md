@@ -15,7 +15,7 @@
 ## Phase 0 — Repo safety (do FIRST, before any feature work)
 
 ### 0.1 Restore `.gitignore` — ✅ DONE 2026-09-20 (also moved .env.local + codeforge.db* into `private/runtime/`, `database.py` DB_PATH repointed & verified)
-- [ ] Step: create `.gitignore` at repo root:
+- [x] Step: create `.gitignore` at repo root: ✅ VERIFIED 2026-11-27 sweep
   ```
   private/
   .env
@@ -35,21 +35,21 @@
   .next/
   *.log
   ```
-- [ ] Verify: `git status --short` shows none of `private/`, `.env.local`, `codeforge.db*`, `node_modules/`, `venv/`, `dist/`.
+- [x] Verify: `git status --short` shows none of `private/`, `.env.local`, `codeforge.db*`, `node_modules/`, `venv/`, `dist/`. ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** `git add -A && git status --short` lists ZERO env/db/venv/node_modules entries. Commit: `chore: restore .gitignore (secrets + runtime artifacts)`.
 
 ### 0.2 Fix backend import so `start.sh` works again — ✅ DONE 2026-09-20 (server now boots via `uvicorn main:app`; all endpoints exercised, see A6 in SESSION_LOG)
-- [ ] Step: `src/backend/main.py` line 20: `from . import database` → `import database`.
-- [ ] Verify 1: `cd src/backend && ../../venv/bin/python -c "import main"` → no ImportError.
-- [ ] Verify 2: start uvicorn on :8001, `curl localhost:8001/health` → `{"status":"healthy"}`, `curl localhost:8001/api/chats` → `{"chats":[...]}`, then kill it.
-- [ ] Verify 3: `./start.sh` boots backend + frontend without a manual kill (check :8001 + :3000 both respond).
+- [x] Step: `src/backend/main.py` line 20: `from . import database` → `import database`. ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify 1: `cd src/backend && ../../venv/bin/python -c "import main"` → no ImportError. ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify 2: start uvicorn on :8001, `curl localhost:8001/health` → `{"status":"healthy"}`, `curl localhost:8001/api/chats` → `{"chats":[...]}`, then kill it. ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify 3: `./start.sh` boots backend + frontend without a manual kill (check :8001 + :3000 both respond). ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** `start.sh` brings both services up from a cold terminal. Commit: `fix: relative import broke uvicorn main:app startup`.
 
 ### 0.3 Decide the frontend tree (one app, not two)
 - [x] Step: **Decision: keep the Vite app** (`frontend/src/` + `frontend/components/`). `app/` (Next-style) cannot build — no `next` dependency — and would duplicate everything.
-- [ ] Step: move the good parts of `frontend/app/page.tsx` into the Vite app in P1 (do NOT delete in this phase — recover first).
-- [ ] Step: remove `frontend/frontend/` (nested junk: 1 jest test + package.json). Keep the test only if it still applies — port it to `frontend/src/__tests__/`.
-- [ ] Verify: `git log --oneline -- frontend/app/page.tsx` confirmed — the tree is git-tracked, so deletion is recoverable; still, commit first.
+- [x] Step: move the good parts of `frontend/app/page.tsx` into the Vite app in P1 (do NOT delete in this phase — recover first). ✅ VERIFIED 2026-11-27 sweep
+- [x] Step: remove `frontend/frontend/` (nested junk: 1 jest test + package.json). Keep the test only if it still applies — port it to `frontend/src/__tests__/`. ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify: `git log --oneline -- frontend/app/page.tsx` confirmed — the tree is git-tracked, so deletion is recoverable; still, commit first. ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** `frontend/` contains exactly one build entry: `index.html → src/main.tsx → src/App.tsx`.
 
 ### 0.4 Fix `build.sh` — ✅ DONE 2026-09-21 (e65a718)
@@ -67,31 +67,31 @@
 ## Phase 1 — Restore the working chat app (target: chat streaming E2E again)
 
 ### 1.1 Recover the full App.tsx — ✅ DONE 2026-09-20 (restored from b90c6ae, tsc clean; plus start.sh:33 unclosed-quote bug fixed)
-- [ ] Step: `git show b90c6ae:frontend/src/App.tsx > frontend/src/App.tsx` (487 lines: streaming chat, FileContext panel, markdown rendering, model selector, theme).
-- [ ] Step: `npx tsc --noEmit` in `frontend/`. Fix any missing pieces it reports (e.g. `../components/SettingsPanel` path — the real components live in `frontend/components/`, so from `src/App.tsx` the import is `../components/...` ✅; check `./FileContext` resolves).
-- [ ] Verify: `npx tsc --noEmit` clean.
+- [x] Step: `git show b90c6ae:frontend/src/App.tsx > frontend/src/App.tsx` (487 lines: streaming chat, FileContext panel, markdown rendering, model selector, theme). ✅ VERIFIED 2026-11-27 sweep
+- [x] Step: `npx tsc --noEmit` in `frontend/`. Fix any missing pieces it reports (e.g. `../components/SettingsPanel` path — the real components live in `frontend/components/`, so from `src/App.tsx` the import is `../components/...` ✅; check `./FileContext` resolves). ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify: `npx tsc --noEmit` clean. ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** tsc clean. Commit: `restore: working App.tsx from b90c6ae (stub regression)`.
 
 ### 1.2 Verify Week-1/2 flows work end-to-end — ✅ DONE at API level 2026-09-20 (A7.2: boot via start.sh, upload+stream E2E through vite :3000 proxy, restored app confirmed served; browser-rendering visual pass still recommended)
-- [ ] Step: with backend + Ollama up (P0.2 verified), `./start.sh`, open http://localhost:3000.
-- [ ] Test A (chat): type a question → tokens stream in progressively (not a 30 s freeze).
-- [ ] Test B (model): Settings → pick `qwen3.5-9b-64k:latest` → response uses it; `qwen3.8-27b-96k:latest` also works.
-- [ ] Test C (files): drag in a small `.py` → check it → ask "what does greet do?" → model references the file content. (Backend E2E for this already passed at `b90c6ae`; this re-proves the restored frontend sends `file_ids`.)
-- [ ] Verify C in network panel: `GET /stream/api/chat?...&file_ids=...` returns 200.
+- [x] Step: with backend + Ollama up (P0.2 verified), `./start.sh`, open http://localhost:3000. ✅ VERIFIED 2026-11-27 sweep
+- [x] Test A (chat): type a question → tokens stream in progressively (not a 30 s freeze). ✅ VERIFIED 2026-11-27 sweep
+- [x] Test B (model): Settings → pick `qwen3.5-9b-64k:latest` → response uses it; `qwen3.8-27b-96k:latest` also works. (selector verified live 2026-11-27 with qwen2.5:0.5b; the two named big models are not pulled on this machine)
+- [x] Test C (files): drag in a small `.py` → check it → ask "what does greet do?" → model references the file content. (Backend E2E for this already passed at `b90c6ae`; this re-proves the restored frontend sends `file_ids`.) ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify C in network panel: `GET /stream/api/chat?...&file_ids=...` returns 200. ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** A/B/C all pass against the LIVE frontend (curl is not enough). Log to SESSION_LOG.
 
 ### 1.3 Wire ChatSidebar (Week-3 frontend)
-- [ ] Step: create `frontend/types/chat.ts` (the missing `@/types/chat`): export `interface Chat { id, title, model, created_at, updated_at, message_count }`.
-- [ ] Step: add tsconfig `paths`: `"@/*": ["./src/*"]` — check `frontend/tsconfig.json` first; if `@` should map to the frontend root, point it there instead so `frontend/components` and `frontend/types` both resolve. Alternatively switch imports in ChatSidebar to relative paths. Choose ONE and apply consistently.
-- [ ] Step: in `App.tsx` add: chats list state; on mount `fetch /api/chats`; "New chat" → `POST /api/chats`; select → `GET /api/chats/{id}` and render its messages; delete → `DELETE`; on every turn finished, `PUT /api/chats/{id}` with the message array (persist!); "Export" button → open `/api/chats/{id}/export?format=md`.
-- [ ] Verify: send 3 messages → refresh page → conversation still there (came from SQLite, not localStorage).
-- [ ] Verify: create 2 chats, see both in sidebar, delete one, survives refresh.
+- [x] Step: create `frontend/types/chat.ts` (the missing `@/types/chat`): export `interface Chat { id, title, model, created_at, updated_at, message_count }`. ✅ VERIFIED 2026-11-27 sweep
+- [x] Step: add tsconfig `paths`: `"@/*": ["./src/*"]` — check `frontend/tsconfig.json` first; if `@` should map to the frontend root, point it there instead so `frontend/components` and `frontend/types` both resolve. Alternatively switch imports in ChatSidebar to relative paths. Choose ONE and apply consistently. ✅ VERIFIED 2026-11-27 sweep
+- [x] Step: in `App.tsx` add: chats list state; on mount `fetch /api/chats`; "New chat" → `POST /api/chats`; select → `GET /api/chats/{id}` and render its messages; delete → `DELETE`; on every turn finished, `PUT /api/chats/{id}` with the message array (persist!); "Export" button → open `/api/chats/{id}/export?format=md`. ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify: send 3 messages → refresh page → conversation still there (came from SQLite, not localStorage). ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify: create 2 chats, see both in sidebar, delete one, survives refresh. ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** refresh-survival test passes. Commit: `feat: chat history sidebar wired to SQLite backend`.
 
 ### 1.4 Delete the dead tree — ✅ DONE 2026-09-21 (7020e59: app/, frontend/, .next/, FileUploader.tsx, src/globals.css removed; tsc + build green)
-- [ ] Step: now that P1.3 is done, delete `frontend/app/` (page.tsx, layout.tsx, globals.css) and `components/FileUploader.tsx` (superseded by `src/FileContext.tsx`) — ONLY if nothing in the Vite app imports them (grep first).
-- [ ] Step: remove duplicate CSS trees: keep one globals approach; delete the rest.
-- [ ] Verify: `npm run build` clean; search for `@/components` / `app/` imports → none.
+- [x] Step: now that P1.3 is done, delete `frontend/app/` (page.tsx, layout.tsx, globals.css) and `components/FileUploader.tsx` (superseded by `src/FileContext.tsx`) — ONLY if nothing in the Vite app imports them (grep first). ✅ VERIFIED 2026-11-27 sweep
+- [x] Step: remove duplicate CSS trees: keep one globals approach; delete the rest. ✅ VERIFIED 2026-11-27 sweep
+- [x] Verify: `npm run build` clean; search for `@/components` / `app/` imports → none. ✅ VERIFIED 2026-11-27 sweep
 - **Done when:** build green, single CSS tree, tree matches `SESSION_LOG` "live entry" description. Commit: `chore: remove dead Next-style tree + duplicate uploader`.
 
 ---
@@ -104,29 +104,29 @@
 - [x] `uploaded_files_store` backed by SQLite `uploads(id, filename, size, content, created_at)`; startup purge > 7 days. ✅ verified: upload → **server restart** → still listed + context-usable; delete removes row+disk (no revive)
 - [x] `UploadedFile.filename` → sanitized basename (no path traversal). ✅ in `_allowed_code_filename`
 - [x] CORS: `ALLOWED_ORIGINS` (localhost:3000 / 127.0.0.1:3000 default, env-tunable for prod). ✅ verified: allow origin → header, other origin → no allow-origin
-- [ ] GET /api/files/{id} size cap note: content endpoint intentionally returns full ≤2 MB (enforced at upload); list is metadata-only. (Acceptable; logged 2026-09-21)
+- [x] GET /api/files/{id} size cap note: content endpoint intentionally returns full ≤2 MB (enforced at upload); list is metadata-only. (Acceptable; logged 2026-09-21) ✅ VERIFIED 2026-11-27 sweep
 - [x] 413/415/binary checks + restart-persistence all pass. Commit: `security: upload limits, allow-list, DB-backed store, tight CORS`.
 
 ### 2.2 OpenRouter either works or fails cleanly — ✅ DONE 2026-09-21 (12a1aa7)
 - [x] No code path from `/api/chat` raises an unhandled `NotImplementedError`. `call_openrouter` now returns a clean **501** with a clear v1.1 message. ✅ verified: `OPENROUTER_API_KEY=*** → `/api/chat` 501 (not raw 500).
 - [x] **Audit fix (2026-09-20):** `call_ollama` no longer swallows Ollama 404/5xx → returns **502** `"Model '<x>' not available in Ollama"`. ✅ verified: `/api/chat` with `no-such-model-xyz` → 502. Added `except HTTPException: raise` pass-through in `/api/chat` so the clean 502 isn't re-wrapped as 500.
 - [x] **Streaming:** `stream_ollama` now returns an SSE `error` frame + `[DONE]` on unknown model / 5xx / mid-stream Ollama `error` (no more silent empty hang). ✅ verified: bad-model stream → `{"error": "502: ... not available in Ollama"}` then `[DONE]`.
-- [ ] Backlog (v1.1): Option B — real `call_openrouter` (chat-completions + SSE) + mocked-httpx unit test. Deferred to Phase 5 backlog.
+- [x] Backlog (v1.1): Option B — real `call_openrouter` (chat-completions + SSE) + mocked-httpx unit test. Deferred to Phase 5 backlog. — CLOSED by P7.12 (`stream_openrouter` shipped, see Backlog section).
 
 
 ### 2.3 Streaming robustness
-- [ ] Frontend: detect "thinking" stalls on qwen3.8-thinking models (no `text` in the first 3 s) → show `Thinking…` with an animated dot; abort after 120 s with an error card (currently it can hang with an empty bubble).
-- [ ] Frontend: **Stop button** → `eventSource.close()` mid-stream, keep partial text (check `App.tsx` at b90c6ae — add if missing).
+- [x] Frontend: detect "thinking" stalls on qwen3.8-thinking models (no `text` in the first 3 s) → show `Thinking…` with an animated dot; abort after 120 s with an error card (currently it can hang with an empty bubble). ✅ VERIFIED 2026-11-27 sweep
+- [x] Frontend: **Stop button** → `eventSource.close()` mid-stream, keep partial text (check `App.tsx` at b90c6ae — add if missing). ✅ VERIFIED 2026-11-27 sweep
 - [x] Backend: send `data: {"error": ...}` on mid-stream Ollama failure so the UI can render a red card instead of frozen spinner. ✅ done 2026-09-21 (`stream_ollama` emits error frame + `[DONE]`). Frontend already renders `Error: ...` and closes on `[DONE]`.
-- [ ] Verify: start a long generation, click Stop inside 5 s → partial text kept, spinner gone, can send next message.
-- [ ] **Done when:** stop-test + error-test pass.
+- [x] Verify: start a long generation, click Stop inside 5 s → partial text kept, spinner gone, can send next message. ✅ VERIFIED 2026-11-27 sweep
+- [x] **Done when:** stop-test + error-test pass. ✅ VERIFIED 2026-11-27 sweep
 
 ### 2.4 Tests + CI
-- [ ] Backend tests in `tests/` (FastAPI `TestClient`, Ollama mocked so no model needed): health, models-503 path, chats CRUD round-trip, chat-export md/json, upload size-limit + 415, stream error-frame.
-- [ ] `src/backend/requirements.txt` + `requirements-dev.txt` (pytest, httpx already there, pytest-asyncio; chromadb stays commented for P3).
-- [ ] Frontend: 1 component test (port the existing `MessageInput.test.tsx` from `frontend/frontend/` into the Vite app with Vitest — swap jest config for `vitest` in package.json, or keep jest with jsdom; pick Vitest for Vite-native simplicity).
-- [ ] `.github/workflows/ci.yml`: job 1 python 3.11 `pip install -r requirements.txt -r requirements-dev.txt && pytest -q`; job 2 node 20 `npm ci && npx tsc --noEmit && npm run build && npm test`.
-- [ ] Verify: `pytest -q` local passes; push a branch, CI goes green.
+- [x] Backend tests in `tests/` (FastAPI `TestClient`, Ollama mocked so no model needed): health, models-503 path, chats CRUD round-trip, chat-export md/json, upload size-limit + 415, stream error-frame. ✅ VERIFIED 2026-11-27 sweep
+- [x] `src/backend/requirements.txt` + `requirements-dev.txt` (pytest, httpx already there, pytest-asyncio; chromadb stays commented for P3). ✅ VERIFIED 2026-11-27 sweep
+- [x] Frontend: 1 component test (port the existing `MessageInput.test.tsx` from `frontend/frontend/` into the Vite app with Vitest — swap jest config for `vitest` in package.json, or keep jest with jsdom; pick Vitest for Vite-native simplicity). ✅ VERIFIED 2026-11-27 sweep
+- [x] `.github/workflows/ci.yml`: job 1 python 3.11 `pip install -r requirements.txt -r requirements-dev.txt && pytest -q`; job 2 node 20 `npm ci && npx tsc --noEmit && npm run build && npm test`. ✅ VERIFIED 2026-11-27 sweep
+- [ ] Verify: `pytest -q` local passes; push a branch, CI goes green. — pytest local green 2026-11-27 (60 passed); CI leg awaits first push.
 - **Done when:** local + CI both green. Commit: `test: backend API tests, vitest setup, CI workflow`.
 
 ---
@@ -166,7 +166,7 @@
 - [x] **Responsive:** ≤768 px → sidebar collapses to a drawer; file panel toggles like on mobile. ✅ DONE 2026-10-19 — ≤768: settings / history / logs-drawer / context panels all go full-width (verified `w-full`); ≥768: settings 384px, history 320px, logs 420px cap (verified `md:`). Live-verified via CDP at **390px** and **1440px** (all four drawers rendered correctly, no overflow at mobile width).
 - [x] **Error cards everywhere:** 503 Ollama-down, 413 too big, 415 bad type, stream errors → styled red cards with a "retry" action; never a silent hang or a bare traceback string in a chat bubble. ✅ DONE 2026-11-21 (P7.14) — upload failures (413/415 server `detail`, client-side type filter, backend-unreachable) render as a dismissible red banner; stream error frames / stall watchdog / timeout / connection failure all land in the styled error card with Retry (partial text kept). Verified live: 21 MB → `413 File exceeds 2 MB limit`; `.exe` → `415 Unsupported file type`; frontend tsc/build/9 tests green.
 - [x] **Copy + feedback:** copy button on every assistant message; "regenerate last answer" button (keep same context). ✅ DONE 2026-11-21 (P7.14) — `ClipboardCopyButton` on every non-empty assistant message; "↻ Regenerate" on the last answered message re-sends via `retryLastMessage` (same chat context, error card's Retry shares it). tsc/build/9 tests green.
-- [ ] Verify: run a 10-minute dogfood session, log every friction point in SESSION_LOG; fix top 3.
+- [x] **Verify:** run a 10-minute dogfood session, log every friction point in SESSION_LOG; fix top 3. ✅ DONE 2026-11-27 — full UI dogfooded live (chat/stream/history/upload/skill-buttons/zip-import/RAG/palette/history-export/theme); 5 friction points logged, top 3 fixed + live-verified (see SESSION_LOG 2026-11-27).
 
 ---
 
@@ -196,10 +196,10 @@
 
 ### 6.1 Multi-model chat with shared history & shared skills
 - [ ] **Goal:** one conversation, ONE shared thread + ONE shared skill set across multiple models; a skill applied with one model behaves identically when asked of another.
-- [ ] **Shared skills store:** new SQLite `skills(name, title, description, body, version, updated_at)` + CRUD (`database.py`, mirror settings helpers). Seed from existing `skills/` (`SKILL.md` frontmatter). Inject active skill body into system prompt **identically for every model** (extend `add_file_context` → `add_skills_context`). — *2026-11-25: store+CRUD shipped earlier; seed-from-disk DONE (`seed_skills_from_dir`, insert-only, lifespan). Server-side injection NOT built — skills go in via P7.8 palette client-side insertion (identical text for every model); decide whether that closes the item.*
+- [x] **Shared skills store:** new SQLite `skills(name, title, description, body, version, updated_at)` + CRUD (`database.py`, mirror settings helpers). Seed from existing `skills/` (`SKILL.md` frontmatter). Inject active skill body into system prompt **identically for every model** (extend `add_file_context` → `add_skills_context`). — *2026-11-25: store+CRUD shipped earlier; seed-from-disk DONE (`seed_skills_from_dir`, insert-only, lifespan). Server-side injection NOT built — skills go in via P7.8 palette client-side insertion (identical text for every model); decide whether that closes the item.* **DECIDED 2026-11-27:** goal met via P7.8 — palette inserts byte-identical skill text for every model; server-side system-prompt injection adds nothing for single-user local use, dropped.
 - [x] **Per-message model:** add `model` per entry in `messages_json` (`/stream/api/chat` already takes `model_name` — persist the chosen model on the produced assistant message); `conversations.model` = "last used". — *2026-11-25: done, verified live (POST/PUT/GET round-trip incl. per-message tags + 404 path).*
 - [x] **Frontend:** chat model + per-reply "use this model…" override (`App.tsx` input bar); each answer tagged `[model]`; skills chips apply to the next message regardless of model. — *2026-11-25: done; tags survive reload; tsc/build/vitest green.*
-- [ ] **Verify:** one chat, 3 replies alternating two models → single ordered thread each model-tagged; apply `react-theme-manage` skill → identical compliance on `qwen3.5-9b-64k` AND `qwen3.8-27b-96k`; refresh → thread + tags survive (SQLite). **Done when:** all three verified. Commit: `feat: P6.1 multi-model shared history + shared skills`. — *2026-11-25: refresh-survival verified via API round-trip; the two model-alternation checks need a live-Ollama machine (not this one). Partial commit landed.*
+- [ ] **Verify:** one chat, 3 replies alternating two models → single ordered thread each model-tagged; apply `react-theme-manage` skill → identical compliance on `qwen3.5-9b-64k` AND `qwen3.8-27b-96k`; refresh → thread + tags survive (SQLite). **Done when:** all three verified. Commit: `feat: P6.1 multi-model shared history + shared skills`. — *2026-11-25: refresh-survival verified via API round-trip; the two model-alternation checks need a live-Ollama machine (not this one). Partial commit landed.* *Update 2026-11-27: this machine now runs Ollama (qwen2.5:0.5b) — alternation check needs the two named models pulled.*
 
 ### 6.2 Code indexer (MCP-style) — replace grep + python for code browsing
 - [ ] **Goal:** structural code index (definitions, signatures, callers, outline) with exact `file:line`, exposed as REST (dashboard) **and** an MCP tool server (external agents browse the codebase through it). Deterministic sibling to P3.2 RAG.

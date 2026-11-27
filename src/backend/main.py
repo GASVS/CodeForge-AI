@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 import httpx
 import os
 import time
@@ -209,6 +209,10 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Request/Response models
 class ChatRequest(BaseModel):
+    # `model_name` shadows pydantic's protected "model_" namespace; opt out so
+    # startup is warning-free (dogfood finding, Nov 27).
+    model_config = ConfigDict(protected_namespaces=())
+
     message: str
     model_name: Optional[str] = "qwen3.5-9b-64k"  # Updated default
     stream: bool = True
