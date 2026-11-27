@@ -361,3 +361,14 @@
 - [🐛→✅] **Friction #3 (fixed): pydantic protected-namespace UserWarning on every startup** (`ChatRequest.model_name`). `model_config = ConfigDict(protected_namespaces=())` added. Live-verified: fresh uvicorn boot, zero UserWarnings in log.
 - [📋] **Backlog (logged, not fixed):** icon-only buttons rely on `title` with no aria-label (a11y audit already planned); "git is not available" shown for imported non-git projects — should read "not a git repository"; uploads are session-scoped and vanish on reload (by design, but worth surfacing in UI copy).
 - [✅] **Verified:** frontend `tsc --noEmit` + `npm run build` + vitest 16/16; backend pytest 60 passed; both UI fixes re-checked live in browser after HMR; server killed after. Commit: see below.
+
+### Session 2026-11-27 — END OF SESSION (PC restart for OS updates) — clean stop point
+- [✅] **Nothing in flight.** Working tree clean at `c159eea` ("fix: dogfood findings…"). Last two commits: `c159eea` dogfood top-3 fixes, `d9e8dec` P7.6 compression fix + v1.0 DoD close.
+- [⚠️] **Servers:** both backend (:8001) and frontend (:3000) die with the reboot — that's fine. Resume with `./start.sh` from repo root (it guards Python 3.10–3.13; venv exists at `venv/`, py3.11).
+- [⚠️] **Local is ~33 commits ahead of origin/main, NOT pushed.** If this Mac dies before pushing, work only lives on this disk. First step next session: `git push` (user hasn't asked to push yet — ask/remind first).
+- [▶] **Resume here, in plan order (`docs/ACTION_PLAN.md`):**
+  1. Line 129 (P2.4 CI): pytest leg green (60 passed); only remaining leg = push a branch and watch CI go green — same push as above.
+  2. P6.1 verify tail: model-alternation check needs `qwen3.5-9b-64k` + `qwen3.8-27b-96k` pulled (this machine has Ollama with qwen2.5:0.5b only).
+  3. Next buildable feature: **P6.2 code indexer** (plan line 205) — structural index (defs/signatures/callers, `file:line`) as REST + MCP server. Nothing started yet.
+  4. v1.0 launch leftovers: demo GIF (line 181), README screenshots dark+light (182), fresh good-first-issue candidates (184 — old three shipped), then PH/HN outreach (188). `git tag -a v1.0` not yet created — decide after push.
+- [📋] **Dogfood backlog awaiting a slot** (from today's session, logged above): aria-labels on icon-only buttons; "not a git repository" wording for non-git imports; UI copy that uploads are session-scoped.
